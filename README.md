@@ -89,6 +89,7 @@ Copy `.env.example` to `.env` and adjust:
 | `SESSION_SECRET` | Long random secret used to sign session cookies (min 16 chars, use 48+ in production) |
 | `APP_URL` | Public URL; when it starts with `https` the cookie is marked `Secure` in production |
 | `TEST_DATABASE_URL` | Optional; test database (defaults to `DATABASE_URL` + `_test`) |
+| `DB_POOL_MAX` | Optional; DB connections per app instance (default 2 on Vercel, 5 elsewhere). On serverless hosts point `DATABASE_URL` at a transaction-mode pooler (Supabase port 6543) |
 | `SEED_OWNER_PASSWORD`, `SEED_MANAGER_PASSWORD` | Optional; passwords for the seeded demo accounts |
 
 `.env` is git-ignored. Never commit secrets.
