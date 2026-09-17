@@ -1,6 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { createProduct, updateProduct, listProducts, findProductByCode, setProductStatus, getProduct, deleteProduct } from "@/lib/services/products";
+import { createProduct, updateProduct, listProducts, findProductByCode, setProductStatus, getProduct, deleteProduct, productForViewer, movementForViewer, updateProductPrices, getPricingSummary } from "@/lib/services/products";
+import { computeMargin } from "@/lib/money";
+import { productPricesSchema } from "@/lib/validation/schemas";
 import { recordSale } from "@/lib/services/inventory";
 import { productCreateSchema } from "@/lib/validation/schemas";
 import { seedBasics } from "./helpers";
@@ -67,19 +69,64 @@ describe("create product", () => {
 });
 
 describe("edit product", () => {
-  it("manager can edit basic fields but not the low-stock override", async () => {
-    const p = await createProduct(input({ name: "Ultrahold", sellingPrice: "2100", startingQuantity: 1 }), owner);
+  it("manager can edit basic fields but not prices or the low-stock override", async () => {
+    const p = await createProduct(input({ name: "Ultrahold", sellingPrice: "2100", costPrice: "1500", startingQuantity: 1 }), owner);
     const updated = await updateProduct(
       p.id,
-      { ...input({ name: "Ultrahold 1.4oz", sellingPrice: "2200", lowStockThreshold: 10 }), unit: "BOTTLE" },
+      { ...input({ name: "Ultrahold 1.4oz", sellingPrice: "2200", costPrice: "1", lowStockThreshold: 10 }), unit: "BOTTLE" },
       manager,
     );
     expect(updated.name).toBe("Ultrahold 1.4oz");
-    expect(updated.sellingPrice).toBe("2200");
+    expect(updated.sellingPrice).toBe("2100"); // manager price change ignored
+    expect(updated.costPrice).toBe("1500");
     expect(updated.unit).toBe("BOTTLE");
     expect(updated.lowStockThreshold).toBeNull(); // manager change ignored
     expect(updated.quantity).toBe(1); // quantity never changes through edit
     expect(updated.updatedByName).toBe(manager.name);
+  });
+
+  it("manager-created products have no prices; owner sets them later", async () => {
+    const p = await createProduct(input({ name: "Manager Tape", sellingPrice: "300", costPrice: "200", startingQuantity: 2 }), manager);
+    expect(p.sellingPrice).toBeNull();
+    expect(p.costPrice).toBeNull();
+    const priced = await updateProductPrices(p.id, productPricesSchema.parse({ costPrice: "200", sellingPrice: "300" }), owner);
+    expect(priced.costPrice).toBe("200");
+    expect(priced.sellingPrice).toBe("300");
+    const audit = await prisma.auditLog.findFirst({ where: { action: "PRODUCT_UPDATED", entityId: p.id }, orderBy: { createdAt: "desc" } });
+    expect(audit?.summary).toMatch(/Changed prices/);
+  });
+
+  it("only the owner can change prices from the pricing page", async () => {
+    const p = await createProduct(input({ name: "Owner Only Price", sellingPrice: "100", costPrice: "50" }), owner);
+    await expect(updateProductPrices(p.id, productPricesSchema.parse({ costPrice: "1", sellingPrice: "2" }), manager)).rejects.toThrow(/owner/i);
+    expect((await getProduct(p.id))?.costPrice).toBe("50");
+  });
+
+  it("cost price is redacted for managers but kept for the owner", async () => {
+    const p = await createProduct(input({ name: "Redacted", sellingPrice: "100", costPrice: "60", startingQuantity: 1 }), owner);
+    expect(productForViewer(p, "MANAGER").costPrice).toBeNull();
+    expect(productForViewer(p, "MANAGER").sellingPrice).toBe("100");
+    expect(productForViewer(p, "OWNER").costPrice).toBe("60");
+    const movement = (await prisma.stockMovement.findFirstOrThrow({ where: { productId: p.id }, include: { product: { select: { name: true, productNumber: true } }, performedBy: { select: { name: true, role: true } } } }));
+    const { toMovementDTO } = await import("@/lib/services/products");
+    const dto = toMovementDTO(movement);
+    expect(dto.unitCost).toBe("60");
+    expect(movementForViewer(dto, "MANAGER").unitCost).toBeNull();
+    expect(movementForViewer(dto, "OWNER").unitCost).toBe("60");
+  });
+
+  it("computes profit and margins", () => {
+    expect(computeMargin("450", "600")).toEqual({ profit: "150.00", marginPct: 25, markupPct: 33.3 });
+    expect(computeMargin("600", "450").profit).toBe("-150.00");
+    expect(computeMargin(null, "600")).toEqual({ profit: null, marginPct: null, markupPct: null });
+    expect(computeMargin("100", "0")).toEqual({ profit: "-100.00", marginPct: null, markupPct: -100 });
+  });
+
+  it("pricing summary totals stock at cost and selling price", async () => {
+    const s = await getPricingSummary();
+    expect(s.products).toBeGreaterThan(0);
+    expect(Number(s.stockAtSelling) - Number(s.stockAtCost)).toBeCloseTo(Number(s.potentialProfit), 2);
+    expect(s.missingCost).toBeGreaterThanOrEqual(0);
   });
 
   it("owner can set the low-stock override", async () => {

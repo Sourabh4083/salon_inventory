@@ -63,23 +63,33 @@ describe("route protection", () => {
     expect(res.headers.get("location")).toContain("/login");
   });
 
-  it("owner can open dashboard, users and settings", async () => {
-    for (const path of ["/dashboard", "/users", "/settings"]) {
+  it("owner can open dashboard, users, settings, reports, activity, pricing and employees", async () => {
+    for (const path of ["/dashboard", "/users", "/settings", "/reports", "/activity", "/pricing", "/employees"]) {
       const res = await get(path, ownerToken);
       expect(res.status, path).toBe(200);
     }
   });
 
-  it("manager can open dashboard and inventory but NOT users or settings", async () => {
-    for (const path of ["/dashboard", "/inventory", "/activity"]) {
+  it("manager can open dashboard and inventory but NOT owner-only pages", async () => {
+    for (const path of ["/dashboard", "/inventory", "/billing/new"]) {
       const res = await get(path, managerToken);
       expect(res.status, path).toBe(200);
     }
-    for (const path of ["/users", "/settings"]) {
+    for (const path of ["/users", "/settings", "/reports", "/activity", "/pricing", "/employees", "/employees/new"]) {
       const res = await get(path, managerToken);
       expect(res.status, path).toBe(307);
       expect(res.headers.get("location")).toContain("/dashboard?denied=1");
     }
+  });
+
+  it("employee documents are owner-only at the API level", async () => {
+    const path = "/api/employees/some-id/documents/some-doc";
+    const anon = await get(path);
+    expect(anon.status).toBe(307); // proxy sends anonymous visitors to /login
+    const manager = await get(path, managerToken);
+    expect(manager.status).toBe(403);
+    const owner = await get(path, ownerToken);
+    expect(owner.status).toBe(404); // authorised, but no such document
   });
 
   it("a token whose role claim was tampered to OWNER is still blocked by the page-level database check", async () => {

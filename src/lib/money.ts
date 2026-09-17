@@ -21,3 +21,23 @@ export function fromPaise(paise: number): string {
 export function trimMoney(value: string): string {
   return value.replace(/\.00$/, "");
 }
+
+export type Margin = { profit: string | null; marginPct: number | null; markupPct: number | null };
+
+/**
+ * Profit per unit and margins from decimal-string prices.
+ * marginPct = profit / selling (share of the sale price that is profit),
+ * markupPct = profit / cost (how much is added on top of cost).
+ * Everything is null when a price is missing; a percentage is null when its divisor is 0.
+ */
+export function computeMargin(cost: string | null | undefined, selling: string | null | undefined): Margin {
+  if (cost == null || cost === "" || selling == null || selling === "") return { profit: null, marginPct: null, markupPct: null };
+  const c = toPaise(cost);
+  const sp = toPaise(selling);
+  const profit = sp - c;
+  return {
+    profit: fromPaise(profit),
+    marginPct: sp > 0 ? Math.round((profit / sp) * 1000) / 10 : null,
+    markupPct: c > 0 ? Math.round((profit / c) * 1000) / 10 : null,
+  };
+}

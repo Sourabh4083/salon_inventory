@@ -5,7 +5,9 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   AlertTriangle,
+  BadgePercent,
   BarChart3,
+  Contact,
   Receipt,
   ReceiptText,
   LayoutDashboard,
@@ -31,6 +33,8 @@ const ICONS: Record<NavItem["icon"], React.ComponentType<{ className?: string }>
   billing: ReceiptText,
   newbill: Receipt,
   reports: BarChart3,
+  pricing: BadgePercent,
+  employees: Contact,
 };
 
 export function SidebarNav({ role, onNavigate, className }: { role: Role; onNavigate?: () => void; className?: string }) {

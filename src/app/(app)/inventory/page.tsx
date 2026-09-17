@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Archive, PackagePlus } from "lucide-react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { listCategories, listProducts, type ProductSort } from "@/lib/services/products";
+import { listCategories, listProducts, productsForViewer, type ProductSort } from "@/lib/services/products";
 import type { StockStatus } from "@/lib/stock-status";
 import { PageHeader } from "@/components/app/page-header";
 import { ProductFilters } from "@/components/app/product-filters";
@@ -65,7 +65,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         <ProductFilters categories={categories} showFilters={!showArchived} />
       </Suspense>
       <ProductList
-        products={result.items}
+        products={productsForViewer(result.items, user.role)}
         currencySymbol={settings.currencySymbol}
         total={result.total}
         page={result.page}

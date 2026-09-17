@@ -4,7 +4,7 @@ import { Activity, AlertTriangle, ArrowRight, Boxes, Package, PackageX, Receipt,
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getDashboardStats, listMovements } from "@/lib/services/inventory";
-import { listProducts } from "@/lib/services/products";
+import { listProducts, productsForViewer } from "@/lib/services/products";
 import { getSalesReport } from "@/lib/services/billing";
 import { resolveRange } from "@/lib/dates";
 import { can } from "@/lib/permissions";
@@ -28,13 +28,14 @@ function greeting() {
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
   const user = await requireUserPage();
   const showSales = can(user.role, "report.view");
+  const showActivity = can(user.role, "stock.history.view");
   const [{ denied }, settings, stats, low, out, recent, today] = await Promise.all([
     searchParams,
     getSettings(),
     getDashboardStats(),
     listProducts({ stockStatus: "LOW_STOCK", sort: "quantity", pageSize: 6 }),
     listProducts({ stockStatus: "OUT_OF_STOCK", sort: "updated", pageSize: 6 }),
-    listMovements({ pageSize: 8 }),
+    showActivity ? listMovements({ pageSize: 8 }) : Promise.resolve(null),
     showSales ? getSalesReport(resolveRange({ range: "today" })) : Promise.resolve(null),
   ]);
 
@@ -102,7 +103,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         ))}
       </section>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+      <div className={showActivity ? "grid grid-cols-1 gap-6 xl:grid-cols-3" : "grid grid-cols-1 gap-6 xl:grid-cols-2"}>
         <section className="space-y-3" aria-labelledby="low-heading">
           <div className="flex items-center justify-between">
             <h2 id="low-heading" className="flex items-center gap-2 font-heading text-lg">
@@ -112,7 +113,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               View all <ArrowRight />
             </Button>
           </div>
-          <DashboardStockList products={low.items} total={low.total} currencySymbol={settings.currencySymbol} emptyText="Nothing is running low. Nice." kind="low" />
+          <DashboardStockList products={productsForViewer(low.items, user.role)} total={low.total} currencySymbol={settings.currencySymbol} emptyText="Nothing is running low. Nice." kind="low" />
         </section>
 
         <section className="space-y-3" aria-labelledby="out-heading">
@@ -124,9 +125,10 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               View all <ArrowRight />
             </Button>
           </div>
-          <DashboardStockList products={out.items} total={out.total} currencySymbol={settings.currencySymbol} emptyText="Everything is in stock." kind="out" />
+          <DashboardStockList products={productsForViewer(out.items, user.role)} total={out.total} currencySymbol={settings.currencySymbol} emptyText="Everything is in stock." kind="out" />
         </section>
 
+        {recent ? (
         <section className="space-y-3" aria-labelledby="activity-heading">
           <div className="flex items-center justify-between">
             <h2 id="activity-heading" className="flex items-center gap-2 font-heading text-lg">
@@ -142,6 +144,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">No stock activity yet.</p>
           )}
         </section>
+        ) : null}
       </div>
     </div>
   );

@@ -4,7 +4,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Archive, History } from "lucide-react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { getProduct } from "@/lib/services/products";
+import { getProduct, movementsForViewer, productForViewer } from "@/lib/services/products";
+import { can } from "@/lib/permissions";
+import { computeMargin } from "@/lib/money";
 import { listMovements } from "@/lib/services/inventory";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/constants";
@@ -31,9 +33,13 @@ export default async function ProductDetailPage({
 }) {
   const user = await requireUserPage();
   const [{ id }, { page, from }] = await Promise.all([params, searchParams]);
-  const [settings, product] = await Promise.all([getSettings(), getProduct(id)]);
-  if (!product) notFound();
-  const history = await listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 });
+  const [settings, found] = await Promise.all([getSettings(), getProduct(id)]);
+  if (!found) notFound();
+  const product = productForViewer(found, user.role);
+  const showCost = can(user.role, "product.cost.view");
+  const showHistory = can(user.role, "stock.history.view");
+  const history = showHistory ? await listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 }) : null;
+  const margin = showCost ? computeMargin(product.costPrice, product.sellingPrice) : null;
 
   const facts: { label: string; value: React.ReactNode }[] = [
     { label: "Product no.", value: <span className="font-mono">{product.productNumber}</span> },
@@ -42,7 +48,23 @@ export default async function ProductDetailPage({
     { label: "Category", value: product.categoryName },
     { label: "Unit", value: UNIT_LABEL[product.unit] },
     { label: "Location", value: product.location ?? "—" },
-    { label: "Cost price", value: formatMoney(product.costPrice, settings.currencySymbol) },
+    ...(showCost
+      ? [
+          { label: "Cost price", value: formatMoney(product.costPrice, settings.currencySymbol) },
+          {
+            label: "Profit per unit",
+            value:
+              margin?.profit != null ? (
+                <span className={Number(margin.profit) < 0 ? "text-destructive" : undefined}>
+                  {formatMoney(margin.profit, settings.currencySymbol)}
+                  {margin.marginPct != null ? ` (${margin.marginPct}% margin)` : ""}
+                </span>
+              ) : (
+                "—"
+              ),
+          },
+        ]
+      : []),
     { label: "Low stock at", value: `${product.effectiveThreshold} ${product.lowStockThreshold == null ? "(shop default)" : "(custom)"}` },
   ];
 
@@ -56,7 +78,7 @@ export default async function ProductDetailPage({
         <p className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900">Barcode matched this product.</p>
       ) : null}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className={showHistory ? "grid grid-cols-1 gap-6 lg:grid-cols-3" : "mx-auto max-w-4xl"}>
         <div className="space-y-6 lg:col-span-2">
           <section className="rounded-2xl border bg-card p-5 shadow-xs sm:p-6">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -128,22 +150,24 @@ export default async function ProductDetailPage({
           </section>
         </div>
 
-        <section className="space-y-3 lg:col-span-1" aria-labelledby="history-heading">
-          <h2 id="history-heading" className="flex items-center gap-2 font-heading text-lg">
-            <History className="size-4.5 text-primary" /> Stock history
-            <span className="text-sm font-normal text-muted-foreground">({history.total})</span>
-          </h2>
-          {history.items.length ? (
-            <>
-              <MovementList movements={history.items} showProduct={false} />
-              <Suspense>
-                <Pagination page={history.page} pageCount={history.pageCount} total={history.total} pageSize={history.pageSize} />
-              </Suspense>
-            </>
-          ) : (
-            <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">No stock movements yet.</p>
-          )}
-        </section>
+        {history ? (
+          <section className="space-y-3 lg:col-span-1" aria-labelledby="history-heading">
+            <h2 id="history-heading" className="flex items-center gap-2 font-heading text-lg">
+              <History className="size-4.5 text-primary" /> Stock history
+              <span className="text-sm font-normal text-muted-foreground">({history.total})</span>
+            </h2>
+            {history.items.length ? (
+              <>
+                <MovementList movements={movementsForViewer(history.items, user.role)} showProduct={false} />
+                <Suspense>
+                  <Pagination page={history.page} pageCount={history.pageCount} total={history.total} pageSize={history.pageSize} />
+                </Suspense>
+              </>
+            ) : (
+              <p className="rounded-2xl border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">No stock movements yet.</p>
+            )}
+          </section>
+        ) : null}
       </div>
     </div>
   );

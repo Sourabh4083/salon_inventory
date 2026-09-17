@@ -3,6 +3,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { SidebarNav } from "@/components/app/sidebar-nav";
 import { MobileNav } from "@/components/app/mobile-nav";
 import { LogoutButton } from "@/components/app/logout-button";
+import { RoleProvider } from "@/components/app/role-context";
 
 export function AppShell({
   user,
@@ -14,6 +15,7 @@ export function AppShell({
   children: React.ReactNode;
 }) {
   return (
+    <RoleProvider role={user.role}>
     <div className="flex min-h-dvh w-full">
       {/* Desktop / tablet sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
@@ -48,5 +50,6 @@ export function AppShell({
         <main className="mx-auto w-full max-w-7xl flex-1 px-4 py-5 sm:px-6 lg:px-8 lg:py-8">{children}</main>
       </div>
     </div>
+    </RoleProvider>
   );
 }

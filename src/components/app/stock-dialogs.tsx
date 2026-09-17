@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/app/field";
 import { QuantityStepper } from "@/components/app/quantity-stepper";
 import { StockBadge } from "@/components/app/stock-badge";
+import { useCan } from "@/components/app/role-context";
 
 export type StockDialogKind = "sale" | "stockIn" | "adjust";
 
@@ -145,6 +146,7 @@ function StockInForm({ product, close, onDone }: FormProps) {
   const router = useRouter();
   const id = useId();
   const [qty, setQty] = useState("1");
+  const canSeeCost = useCan("product.cost.view");
   const [unitCost, setUnitCost] = useState(product.costPrice ?? "");
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -156,7 +158,7 @@ function StockInForm({ product, close, onDone }: FormProps) {
     e.preventDefault();
     if (!Number.isFinite(n) || n < 1) return setError("Enter a quantity of at least 1.");
     start(async () => {
-      const res = await stockInAction({ productId: product.id, quantity: n, unitCost, note });
+      const res = await stockInAction({ productId: product.id, quantity: n, unitCost: canSeeCost ? unitCost : "", note });
       if (!res.ok) {
         setFieldErr(res.fieldErrors ?? {});
         setError(res.fieldErrors ? null : res.error);
@@ -180,10 +182,12 @@ function StockInForm({ product, close, onDone }: FormProps) {
           {product.quantity} in stock → {product.quantity + (Number.isFinite(n) ? n : 0)} after delivery
         </p>
       </Field>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <Field label="Purchase price per unit (optional)" htmlFor={`${id}-cost`} error={fieldErr.unitCost}>
-          <Input id={`${id}-cost`} className="h-10" inputMode="decimal" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="e.g. 500" aria-invalid={Boolean(fieldErr.unitCost)} />
-        </Field>
+      <div className={`grid grid-cols-1 gap-4 ${canSeeCost ? "sm:grid-cols-2" : ""}`}>
+        {canSeeCost ? (
+          <Field label="Purchase price per unit (optional)" htmlFor={`${id}-cost`} error={fieldErr.unitCost}>
+            <Input id={`${id}-cost`} className="h-10" inputMode="decimal" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="e.g. 500" aria-invalid={Boolean(fieldErr.unitCost)} />
+          </Field>
+        ) : null}
         <Field label="Note (optional)" htmlFor={`${id}-note`}>
           <Input id={`${id}-note`} className="h-10" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. New delivery" maxLength={500} />
         </Field>

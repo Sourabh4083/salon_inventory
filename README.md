@@ -34,6 +34,15 @@ business settings and simple customer **billing** with sales reports. It is **no
   prices, payments split, sales by day, top products/services) and a "Sales today" card on the dashboard.
 - **Owner-only**: manager accounts (create, rename, disable, reset password), business settings
   (name, currency, low-stock threshold), product categories, permanent product delete, audit log.
+- **Owner-only prices**: only the owner can see or change a product's cost price and selling price. Managers see
+  the selling price read-only and never receive cost prices (they are stripped server-side before any page or
+  action result reaches the browser). The **Prices & Margins** page lists cost, selling price, profit per unit,
+  margin % and stock value at cost / selling price, with inline price editing.
+- **Owner-only Stock Activity**: the stock movement ledger, per-product history and the dashboard "recent activity"
+  panel are visible to the owner only.
+- **Owner-only Employees**: staff records (contact details, designation, joining / leaving dates, Aadhaar number
+  shown masked), Aadhaar card uploads (JPG / PNG / WebP / PDF up to 4 MB, stored in PostgreSQL and served through
+  an owner-only route), agreed monthly salary and a salary payment log (date, amount, month, Cash / UPI / Card).
 - **Audit log** of important events (product created/edited/archived, user created/disabled, settings changed, logins).
 - Responsive layout: sidebar on desktop/tablet, hamburger sheet navigation on mobile, no horizontal overflow.
 

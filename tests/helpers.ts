@@ -6,6 +6,9 @@ import type { Role } from "@/generated/prisma/enums";
 /** Wipes all tables (order matters because of foreign keys) and resets the product number sequence. */
 export async function resetDatabase() {
   await prisma.auditLog.deleteMany();
+  await prisma.salaryPayment.deleteMany();
+  await prisma.employeeDocument.deleteMany();
+  await prisma.employee.deleteMany();
   await prisma.stockMovement.deleteMany();
   await prisma.billItem.deleteMany();
   await prisma.bill.deleteMany();

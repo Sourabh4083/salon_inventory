@@ -18,7 +18,10 @@ export type Permission =
   | "bill.view"
   | "bill.cancel"
   | "service.manage"
-  | "report.view";
+  | "report.view"
+  | "product.cost.view"
+  | "product.price.edit"
+  | "employee.manage";
 
 const MANAGER_PERMISSIONS: Permission[] = [
   "dashboard.view",
@@ -28,7 +31,6 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "stock.in",
   "stock.sale",
   "stock.adjust",
-  "stock.history.view",
   "bill.create",
   "bill.view",
 ];
@@ -43,6 +45,10 @@ const OWNER_PERMISSIONS: Permission[] = [
   "bill.cancel",
   "service.manage",
   "report.view",
+  "stock.history.view",
+  "product.cost.view",
+  "product.price.edit",
+  "employee.manage",
 ];
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {
@@ -56,7 +62,8 @@ export function can(role: Role, permission: Permission): boolean {
 
 /**
  * Product fields a manager may change ("basic product information").
- * Owner may change everything, including the per-product low-stock threshold and status.
+ * Prices (cost and selling) are owner-only; the owner may change everything,
+ * including the per-product low-stock threshold and status.
  */
 export const MANAGER_EDITABLE_PRODUCT_FIELDS: ReadonlySet<string> = new Set([
   "name",
@@ -64,8 +71,6 @@ export const MANAGER_EDITABLE_PRODUCT_FIELDS: ReadonlySet<string> = new Set([
   "sku",
   "barcode",
   "description",
-  "sellingPrice",
-  "costPrice",
   "unit",
   "location",
   "notes",

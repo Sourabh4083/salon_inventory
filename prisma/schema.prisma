@@ -43,6 +43,12 @@ enum BillItemKind {
   SERVICE
 }
 
+enum EmployeeDocumentKind {
+  AADHAAR_FRONT
+  AADHAAR_BACK
+  OTHER
+}
+
 enum Unit {
   PIECE
   PACK
@@ -70,6 +76,10 @@ model User {
   updatedProducts Product[]       @relation("ProductUpdatedBy")
   bills           Bill[]          @relation("BillCreatedBy")
   cancelledBills  Bill[]          @relation("BillCancelledBy")
+  createdEmployees  Employee[]         @relation("EmployeeCreatedBy")
+  updatedEmployees  Employee[]         @relation("EmployeeUpdatedBy")
+  uploadedDocuments EmployeeDocument[] @relation("EmployeeDocumentUploadedBy")
+  salaryPayments    SalaryPayment[]    @relation("SalaryPaymentCreatedBy")
 
   @@index([role, isActive])
 }
@@ -224,4 +234,67 @@ model AuditLog {
 
   @@index([createdAt])
   @@index([entityType, entityId])
+}
+
+// ---------- Employees (owner-only) ----------
+
+model Employee {
+  id            String    @id @default(cuid())
+  name          String
+  phone         String?
+  email         String?
+  address       String?
+  designation   String? // e.g. Stylist, Helper, Receptionist
+  joinedAt      DateTime?
+  leftAt        DateTime?
+  isActive      Boolean   @default(true)
+  aadhaarNumber String? // 12 digits; shown masked in the UI
+  monthlySalary Decimal?  @db.Decimal(12, 2)
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  createdById   String?
+  updatedById   String?
+
+  createdBy User?              @relation("EmployeeCreatedBy", fields: [createdById], references: [id])
+  updatedBy User?              @relation("EmployeeUpdatedBy", fields: [updatedById], references: [id])
+  documents EmployeeDocument[]
+  payments  SalaryPayment[]
+
+  @@index([isActive, name])
+}
+
+/// Uploaded identity documents (Aadhaar card images / PDF). Bytes live in the database.
+model EmployeeDocument {
+  id           String               @id @default(cuid())
+  employeeId   String
+  kind         EmployeeDocumentKind @default(OTHER)
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  data         Bytes
+  uploadedById String?
+  createdAt    DateTime             @default(now())
+
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  uploadedBy User?    @relation("EmployeeDocumentUploadedBy", fields: [uploadedById], references: [id])
+
+  @@index([employeeId])
+}
+
+model SalaryPayment {
+  id            String        @id @default(cuid())
+  employeeId    String
+  amount        Decimal       @db.Decimal(12, 2)
+  paidOn        DateTime
+  periodMonth   String? // "2026-09": which month's salary this covers
+  paymentMethod PaymentMethod @default(CASH)
+  note          String?
+  createdById   String
+  createdAt     DateTime      @default(now())
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("SalaryPaymentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([employeeId, paidOn])
 }

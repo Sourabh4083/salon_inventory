@@ -23,7 +23,8 @@ export function ProductFilters({
   autoFocus,
 }: {
   categories: Category[];
-  showFilters?: boolean;
+  /** true = all filters, "pricing" = category + sort only, false = search only */
+  showFilters?: boolean | "pricing";
   autoFocus?: boolean;
 }) {
   const router = useRouter();
@@ -137,17 +138,19 @@ export function ProductFilters({
               </option>
             ))}
           </NativeSelect>
-          <NativeSelect
-            aria-label="Stock status"
-            value={params.get("status") ?? ""}
-            onChange={(e) => pushParams((p) => (e.target.value ? p.set("status", e.target.value) : p.delete("status")))}
-            className="h-12 rounded-xl bg-card lg:w-40"
-          >
-            <option value="">All stock levels</option>
-            <option value="IN_STOCK">In stock</option>
-            <option value="LOW_STOCK">Low stock</option>
-            <option value="OUT_OF_STOCK">Out of stock</option>
-          </NativeSelect>
+          {showFilters !== "pricing" ? (
+            <NativeSelect
+              aria-label="Stock status"
+              value={params.get("status") ?? ""}
+              onChange={(e) => pushParams((p) => (e.target.value ? p.set("status", e.target.value) : p.delete("status")))}
+              className="h-12 rounded-xl bg-card lg:w-40"
+            >
+              <option value="">All stock levels</option>
+              <option value="IN_STOCK">In stock</option>
+              <option value="LOW_STOCK">Low stock</option>
+              <option value="OUT_OF_STOCK">Out of stock</option>
+            </NativeSelect>
+          ) : null}
           <NativeSelect
             aria-label="Sort by"
             value={params.get("sort") ?? "name"}

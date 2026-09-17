@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
-import type { MovementType, ProductStatus, Unit } from "@/generated/prisma/enums";
+import type { MovementType, ProductStatus, Role, Unit } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import { getSettings } from "@/lib/services/settings";
 import { recordAudit } from "@/lib/services/audit";
@@ -9,7 +9,8 @@ import { MANAGER_EDITABLE_PRODUCT_FIELDS } from "@/lib/permissions";
 import { PAGE_SIZE } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 import type { z } from "zod";
-import type { productCreateSchema, productUpdateSchema } from "@/lib/validation/schemas";
+import type { productCreateSchema, productPricesSchema, productUpdateSchema } from "@/lib/validation/schemas";
+import { fromPaise, toPaise } from "@/lib/money";
 
 /* ---------- DTOs (serialisable for client components) ---------- */
 
@@ -115,6 +116,28 @@ export function toMovementDTO(m: MovementRow): MovementDTO {
     performedByRole: m.performedBy.role,
     createdAt: m.createdAt.toISOString(),
   };
+}
+
+/* ---------- Viewer redaction ---------- */
+
+/**
+ * Cost information is owner-only. Every DTO that leaves the server for a page or
+ * client component must pass through these so a manager's browser never receives it.
+ */
+export function productForViewer(dto: ProductDTO, role: Role): ProductDTO {
+  return role === "OWNER" ? dto : { ...dto, costPrice: null };
+}
+
+export function productsForViewer(list: ProductDTO[], role: Role): ProductDTO[] {
+  return role === "OWNER" ? list : list.map((p) => productForViewer(p, role));
+}
+
+export function movementForViewer(dto: MovementDTO, role: Role): MovementDTO {
+  return role === "OWNER" ? dto : { ...dto, unitCost: null };
+}
+
+export function movementsForViewer(list: MovementDTO[], role: Role): MovementDTO[] {
+  return role === "OWNER" ? list : list.map((m) => movementForViewer(m, role));
 }
 
 /* ---------- Helpers ---------- */
@@ -253,6 +276,8 @@ type UpdateInput = z.output<typeof productUpdateSchema>;
 
 export async function createProduct(input: CreateInput, actor: SessionUser): Promise<ProductDTO> {
   const settings = await getSettings();
+  // Prices are owner-only: a manager's product is created without them.
+  if (actor.role !== "OWNER") input = { ...input, costPrice: null, sellingPrice: null };
   try {
     const created = await prisma.$transaction(async (tx) => {
       const category = await tx.category.findUnique({ where: { id: input.categoryId } });
@@ -367,6 +392,80 @@ export async function updateProduct(id: string, input: UpdateInput, actor: Sessi
     if (isUniqueViolation(err)) throw uniqueError(err);
     throw err;
   }
+}
+
+type PricesInput = z.output<typeof productPricesSchema>;
+
+/** Owner only: change cost / selling price from the Prices & Margins page. */
+export async function updateProductPrices(id: string, input: PricesInput, actor: SessionUser): Promise<ProductDTO> {
+  if (actor.role !== "OWNER") throw new AppError("Only the owner can change prices.", "FORBIDDEN");
+  const settings = await getSettings();
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.product.findUnique({ where: { id } });
+    if (!existing) throw new AppError("Product not found.", "NOT_FOUND");
+    const changed: string[] = [];
+    if ((existing.costPrice?.toString() ?? null) !== input.costPrice) changed.push("costPrice");
+    if ((existing.sellingPrice?.toString() ?? null) !== input.sellingPrice) changed.push("sellingPrice");
+    const product = await tx.product.update({
+      where: { id },
+      data: { costPrice: input.costPrice, sellingPrice: input.sellingPrice, updatedById: actor.id },
+      include: productInclude,
+    });
+    if (changed.length) {
+      await recordAudit(tx, {
+        action: "PRODUCT_UPDATED",
+        entityType: "Product",
+        entityId: id,
+        summary: `Changed prices of ${product.productNumber} "${product.name}" (${changed.join(", ")})`,
+        metadata: { changedFields: changed, costPrice: input.costPrice, sellingPrice: input.sellingPrice },
+        actorId: actor.id,
+      });
+    }
+    return product;
+  });
+  return toProductDTO(updated, settings.lowStockThreshold);
+}
+
+export type PricingSummary = {
+  products: number;
+  missingCost: number;
+  missingSelling: number;
+  belowCost: number;
+  stockAtCost: string;
+  stockAtSelling: string;
+  potentialProfit: string;
+};
+
+/** Owner only: totals for the Prices & Margins page (active products). */
+export async function getPricingSummary(): Promise<PricingSummary> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE" },
+    select: { quantity: true, costPrice: true, sellingPrice: true },
+  });
+  let missingCost = 0;
+  let missingSelling = 0;
+  let belowCost = 0;
+  let atCost = 0;
+  let atSelling = 0;
+  for (const r of rows) {
+    const cost = r.costPrice ? toPaise(r.costPrice.toString()) : null;
+    const selling = r.sellingPrice ? toPaise(r.sellingPrice.toString()) : null;
+    if (cost === null) missingCost++;
+    if (selling === null) missingSelling++;
+    if (cost !== null && selling !== null && selling < cost) belowCost++;
+    const qty = Math.max(0, r.quantity);
+    if (cost !== null) atCost += cost * qty;
+    if (selling !== null) atSelling += selling * qty;
+  }
+  return {
+    products: rows.length,
+    missingCost,
+    missingSelling,
+    belowCost,
+    stockAtCost: fromPaise(atCost),
+    stockAtSelling: fromPaise(atSelling),
+    potentialProfit: fromPaise(atSelling - atCost),
+  };
 }
 
 export async function setProductStatus(id: string, status: ProductStatus, actor: SessionUser) {

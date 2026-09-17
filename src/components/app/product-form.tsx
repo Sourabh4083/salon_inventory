@@ -9,6 +9,7 @@ import { createProductAction, updateProductAction } from "@/app/actions/products
 import type { ProductDTO } from "@/lib/services/products";
 import type { ProductCreateInput } from "@/lib/validation/schemas";
 import { UNITS } from "@/lib/constants";
+import { formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -78,8 +79,9 @@ export function ProductForm({
     const payload: ProductCreateInput = {
       name: values.name,
       categoryId: values.categoryId,
-      sellingPrice: values.sellingPrice,
-      costPrice: values.costPrice,
+      // Prices are owner-only; the server ignores them for managers anyway.
+      sellingPrice: isOwner ? values.sellingPrice : "",
+      costPrice: isOwner ? values.costPrice : "",
       sku: values.sku,
       barcode: values.barcode,
       startingQuantity: values.startingQuantity === "" ? 0 : Number(values.startingQuantity),
@@ -128,12 +130,22 @@ export function ProductForm({
               ))}
             </NativeSelect>
           </Field>
-          <Field label={`Selling price (${currencySymbol})`} htmlFor="sellingPrice" error={errors.sellingPrice}>
-            <Input id="sellingPrice" className="h-11 text-base" inputMode="decimal" placeholder="e.g. 600" {...register("sellingPrice")} aria-invalid={Boolean(errors.sellingPrice)} />
-          </Field>
-          <Field label={`Cost price (${currencySymbol})`} htmlFor="costPrice" error={errors.costPrice}>
-            <Input id="costPrice" className="h-11 text-base" inputMode="decimal" placeholder="e.g. 450" {...register("costPrice")} aria-invalid={Boolean(errors.costPrice)} />
-          </Field>
+          {isOwner ? (
+            <>
+              <Field label={`Selling price (${currencySymbol})`} htmlFor="sellingPrice" error={errors.sellingPrice}>
+                <Input id="sellingPrice" className="h-11 text-base" inputMode="decimal" placeholder="e.g. 600" {...register("sellingPrice")} aria-invalid={Boolean(errors.sellingPrice)} />
+              </Field>
+              <Field label={`Cost price (${currencySymbol})`} htmlFor="costPrice" error={errors.costPrice} hint="Only the owner can see and change cost price.">
+                <Input id="costPrice" className="h-11 text-base" inputMode="decimal" placeholder="e.g. 450" {...register("costPrice")} aria-invalid={Boolean(errors.costPrice)} />
+              </Field>
+            </>
+          ) : (
+            <Field label={`Selling price (${currencySymbol})`} hint="Prices are set by the owner.">
+              <p className="flex h-11 items-center rounded-lg border border-dashed bg-muted/40 px-3 text-base font-medium tabular-nums">
+                {editing ? formatMoney(product?.sellingPrice, currencySymbol) : "Set by owner after saving"}
+              </p>
+            </Field>
+          )}
         </div>
       </section>
 

@@ -71,6 +71,13 @@ export type ProductCreateInput = z.input<typeof productCreateSchema>;
 export const productUpdateSchema = productCreateSchema.omit({ startingQuantity: true });
 export type ProductUpdateInput = z.input<typeof productUpdateSchema>;
 
+/** Owner-only price edit from the Prices & Margins page. */
+export const productPricesSchema = z.object({
+  costPrice: moneyInput,
+  sellingPrice: moneyInput,
+});
+export type ProductPricesInput = z.input<typeof productPricesSchema>;
+
 export const stockInSchema = z.object({
   productId: z.string().min(1),
   quantity: positiveQuantityInput,
@@ -184,3 +191,125 @@ export const serviceSchema = z.object({
   price: requiredMoney,
 });
 export type ServiceInput = z.input<typeof serviceSchema>;
+
+// ---- Employees (owner-only) ----
+
+/** "2026-09-18" -> Date (local midnight) | null. Blank allowed. */
+const optionalDateInput = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      ctx.addIssue({ code: "custom", message: "Enter a date as YYYY-MM-DD." });
+      return z.NEVER;
+    }
+    const d = new Date(`${v}T00:00:00`);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: "custom", message: "Enter a valid date." });
+      return z.NEVER;
+    }
+    return d;
+  });
+
+const requiredDateInput = z
+  .string()
+  .trim()
+  .min(1, "Enter a date.")
+  .transform((v, ctx) => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      ctx.addIssue({ code: "custom", message: "Enter a date as YYYY-MM-DD." });
+      return z.NEVER;
+    }
+    const d = new Date(`${v}T00:00:00`);
+    if (Number.isNaN(d.getTime())) {
+      ctx.addIssue({ code: "custom", message: "Enter a valid date." });
+      return z.NEVER;
+    }
+    return d;
+  });
+
+const phoneInput = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    const digits = v.replace(/[\s\-()+]/g, "");
+    if (!/^\d{10,15}$/.test(digits)) {
+      ctx.addIssue({ code: "custom", message: "Enter a phone number with 10 to 15 digits." });
+      return z.NEVER;
+    }
+    return digits;
+  });
+
+const aadhaarInput = z
+  .string()
+  .trim()
+  .optional()
+  .transform((v, ctx) => {
+    if (!v) return null;
+    const digits = v.replace(/\s/g, "");
+    if (!/^\d{12}$/.test(digits)) {
+      ctx.addIssue({ code: "custom", message: "Aadhaar number must be 12 digits." });
+      return z.NEVER;
+    }
+    return digits;
+  });
+
+export const employeeSchema = z.object({
+  name: trimmed(120).min(1, "Name is required."),
+  phone: phoneInput,
+  email: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v) return null;
+      const lower = v.toLowerCase();
+      if (!z.string().email().safeParse(lower).success) {
+        ctx.addIssue({ code: "custom", message: "Enter a valid email address." });
+        return z.NEVER;
+      }
+      return lower;
+    }),
+  address: optionalText(500),
+  designation: optionalText(80),
+  joinedAt: optionalDateInput,
+  leftAt: optionalDateInput,
+  aadhaarNumber: aadhaarInput,
+  monthlySalary: moneyInput,
+  notes: optionalText(1000),
+});
+export type EmployeeInput = z.input<typeof employeeSchema>;
+
+export const salaryPaymentSchema = z.object({
+  employeeId: z.string().min(1),
+  amount: requiredMoney.transform((v, ctx) => {
+    if (Number(v) <= 0) {
+      ctx.addIssue({ code: "custom", message: "Amount must be more than 0." });
+      return z.NEVER;
+    }
+    return v;
+  }),
+  paidOn: requiredDateInput,
+  periodMonth: z
+    .string()
+    .trim()
+    .optional()
+    .transform((v, ctx) => {
+      if (!v) return null;
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(v)) {
+        ctx.addIssue({ code: "custom", message: "Enter the month as YYYY-MM." });
+        return z.NEVER;
+      }
+      return v;
+    }),
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  note: optionalText(300),
+});
+export type SalaryPaymentInput = z.input<typeof salaryPaymentSchema>;
+
+export const EMPLOYEE_DOC_KINDS = ["AADHAAR_FRONT", "AADHAAR_BACK", "OTHER"] as const;
+export const employeeDocumentKindSchema = z.enum(EMPLOYEE_DOC_KINDS).default("OTHER");

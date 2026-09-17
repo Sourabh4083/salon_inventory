@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { listCategories, listProducts } from "@/lib/services/products";
+import { listCategories, listProducts, productsForViewer } from "@/lib/services/products";
 import { PageHeader } from "@/components/app/page-header";
 import { ProductFilters } from "@/components/app/product-filters";
 import { ProductList } from "@/components/app/product-list";
@@ -11,7 +11,7 @@ export const metadata: Metadata = { title: "Out of Stock" };
 export const dynamic = "force-dynamic";
 
 export default async function OutOfStockPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
-  await requireUserPage();
+  const user = await requireUserPage();
   const params = await searchParams;
   const [settings, categories, result] = await Promise.all([
     getSettings(),
@@ -28,7 +28,7 @@ export default async function OutOfStockPage({ searchParams }: { searchParams: P
         <ProductFilters categories={categories} showFilters={false} />
       </Suspense>
       <ProductList
-        products={result.items}
+        products={productsForViewer(result.items, user.role)}
         currencySymbol={settings.currencySymbol}
         total={result.total}
         page={result.page}
