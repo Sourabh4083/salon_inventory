@@ -9,7 +9,6 @@ import { BillComposer } from "@/components/app/bill-composer";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "New Bill" };
-export const dynamic = "force-dynamic";
 
 export default async function NewBillPage() {
   await requirePermissionPage("bill.create");

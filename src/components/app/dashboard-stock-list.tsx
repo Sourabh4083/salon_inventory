@@ -15,7 +15,6 @@ export function DashboardStockList({
 }: {
   products: ProductDTO[];
   total: number;
-  currencySymbol: string;
   emptyText: string;
   kind: "low" | "out";
 }) {

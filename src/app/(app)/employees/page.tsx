@@ -11,7 +11,6 @@ import { EmployeeList } from "@/components/app/employee-list";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Employees" };
-export const dynamic = "force-dynamic";
 
 const STATUSES = new Set<EmployeeStatusFilter>(["active", "inactive", "all"]);
 

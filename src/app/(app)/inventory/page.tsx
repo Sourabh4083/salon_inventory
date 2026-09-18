@@ -12,7 +12,6 @@ import { ProductList } from "@/components/app/product-list";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "All Products" };
-export const dynamic = "force-dynamic";
 
 type Params = { q?: string; category?: string; status?: string; sort?: string; page?: string; archived?: string };
 

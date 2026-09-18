@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { KeyRound, LoaderCircle, Pencil, ShieldCheck, UserPlus, UserX } from "lucide-react";
 import { createManagerAction, resetManagerPasswordAction, updateManagerAction } from "@/app/actions/users";
@@ -107,7 +106,6 @@ function UserRow({ user, isMe, onEdit, onPassword }: { user: UserDTO; isMe: bool
 }
 
 function CreateManagerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [values, setValues] = useState({ name: "", email: "", password: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -131,7 +129,6 @@ function CreateManagerDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       toast.success("Manager account created", { description: `${res.data.name} can now sign in.` });
       reset();
       onOpenChange(false);
-      router.refresh();
     });
   };
 
@@ -166,7 +163,6 @@ function CreateManagerDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 }
 
 function EditManagerDialog({ user, onOpenChange }: { user: UserDTO | null; onOpenChange: (o: boolean) => void }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [name, setName] = useState(user?.name ?? "");
   const [isActive, setIsActive] = useState(user?.isActive ?? true);
@@ -194,7 +190,6 @@ function EditManagerDialog({ user, onOpenChange }: { user: UserDTO | null; onOpe
       }
       toast.success("Manager updated", { description: res.data.isActive ? `${res.data.name} is active.` : `${res.data.name} is disabled and cannot sign in.` });
       onOpenChange(false);
-      router.refresh();
     });
   };
 

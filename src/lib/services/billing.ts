@@ -104,7 +104,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
 
   const billId = await prisma.$transaction(async (tx) => {
     const productIds = [...productQty.keys()].sort();
-    const products = new Map<string, { id: string; name: string; quantity: number; status: string; costPrice: string | null }>();
+    const products = new Map<string, Awaited<ReturnType<typeof lockProduct>>>();
     for (const id of productIds) {
       const locked = await lockProduct(tx, id);
       if (locked.status !== "ACTIVE") throw new AppError(`"${locked.name}" is archived and cannot be sold.`);
@@ -117,8 +117,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
           "INSUFFICIENT_STOCK",
         );
       }
-      const full = await tx.product.findUniqueOrThrow({ where: { id }, select: { costPrice: true } });
-      products.set(id, { ...locked, costPrice: full.costPrice ? full.costPrice.toString() : null });
+      products.set(id, locked);
     }
 
     const serviceIds = data.items.flatMap((i) => (i.kind === "SERVICE" && i.serviceId ? [i.serviceId] : []));
@@ -182,15 +181,15 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
     for (const id of productIds) {
       const p = products.get(id)!;
       const qty = productQty.get(id)!;
-      const movement = await applyChange(tx, {
+      await applyChange(tx, {
         productId: id,
         type: "SALE",
         previousQuantity: p.quantity,
         newQuantity: p.quantity - qty,
         note: `Sold on ${bill.billNumber}`,
         actorId: actor.id,
+        billId: bill.id,
       });
-      await tx.stockMovement.update({ where: { id: movement.id }, data: { billId: bill.id } });
     }
 
     await recordAudit(tx, {
@@ -265,15 +264,15 @@ export async function cancelBill(input: { billId: string; reason: string }, acto
       const existing = await tx.product.findUnique({ where: { id }, select: { id: true } });
       if (!existing) continue; // product was deleted since; nothing to restore
       const locked = await lockProduct(tx, id);
-      const movement = await applyChange(tx, {
+      await applyChange(tx, {
         productId: id,
         type: "BILL_CANCELLED",
         previousQuantity: locked.quantity,
         newQuantity: locked.quantity + restore.get(id)!,
         note: `${bill.billNumber} cancelled: ${input.reason}`,
         actorId: actor.id,
+        billId: bill.id,
       });
-      await tx.stockMovement.update({ where: { id: movement.id }, data: { billId: bill.id } });
     }
 
     await tx.bill.update({

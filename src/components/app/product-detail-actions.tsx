@@ -42,7 +42,6 @@ export function ProductDetailActions({ product, role }: { product: ProductDTO; r
         description: archived ? `${product.name} is active again.` : `${product.name} is hidden from inventory but keeps its history.`,
       });
       setConfirmOpen(false);
-      router.refresh();
     });
   };
 
@@ -56,7 +55,6 @@ export function ProductDetailActions({ product, role }: { product: ProductDTO; r
       toast.success("Product deleted", { description: `${res.data.productNumber} "${res.data.name}" has been permanently removed.` });
       setDeleteOpen(false);
       router.push("/inventory");
-      router.refresh();
     });
   };
 

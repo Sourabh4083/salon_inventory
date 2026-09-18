@@ -68,7 +68,6 @@ export function EmployeeForm({ currencySymbol, employee }: { currencySymbol: str
       }
       toast.success(editing ? "Employee updated" : "Employee added", { description: res.data.name });
       router.push(`/employees/${res.data.id}`);
-      router.refresh();
     });
   };
 

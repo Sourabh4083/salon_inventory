@@ -13,7 +13,6 @@ import { Pagination } from "@/components/app/pagination";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Prices & Margins" };
-export const dynamic = "force-dynamic";
 
 type Params = { q?: string; category?: string; sort?: string; page?: string };
 const SORTS = new Set<ProductSort>(["name", "quantity", "price", "updated"]);

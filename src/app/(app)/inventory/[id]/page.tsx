@@ -16,8 +16,6 @@ import { ProductDetailActions } from "@/components/app/product-detail-actions";
 import { Pagination } from "@/components/app/pagination";
 import { Suspense } from "react";
 
-export const dynamic = "force-dynamic";
-
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const { id } = await params;
   const product = await getProduct(id);
@@ -33,12 +31,15 @@ export default async function ProductDetailPage({
 }) {
   const user = await requireUserPage();
   const [{ id }, { page, from }] = await Promise.all([params, searchParams]);
-  const [settings, found] = await Promise.all([getSettings(), getProduct(id)]);
-  if (!found) notFound();
-  const product = productForViewer(found, user.role);
   const showCost = can(user.role, "product.cost.view");
   const showHistory = can(user.role, "stock.history.view");
-  const history = showHistory ? await listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 }) : null;
+  const [settings, found, history] = await Promise.all([
+    getSettings(),
+    getProduct(id),
+    showHistory ? listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 }) : null,
+  ]);
+  if (!found) notFound();
+  const product = productForViewer(found, user.role);
   const margin = showCost ? computeMargin(product.costPrice, product.sellingPrice) : null;
 
   const facts: { label: string; value: React.ReactNode }[] = [

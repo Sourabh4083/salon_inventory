@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { toast } from "sonner";
 import { LoaderCircle, Save } from "lucide-react";
 import { createProductAction, updateProductAction } from "@/app/actions/products";
@@ -69,7 +69,8 @@ export function ProductForm({
       lowStockThreshold: product?.lowStockThreshold != null ? String(product.lowStockThreshold) : "",
     },
   });
-  const { register, handleSubmit, watch, setValue, formState } = form;
+  const { register, handleSubmit, control, setValue, formState } = form;
+  const startingQuantity = useWatch({ control, name: "startingQuantity" });
   const errors = { ...serverErrors };
   for (const [k, v] of Object.entries(formState.errors)) if (v?.message) errors[k] = String(v.message);
 
@@ -100,7 +101,6 @@ export function ProductForm({
       }
       toast.success(editing ? "Product updated" : "Product saved", { description: `${res.data.name} · Stock ${res.data.quantity}` });
       router.push(`/inventory/${res.data.id}`);
-      router.refresh();
     });
   };
 
@@ -177,7 +177,7 @@ export function ProductForm({
           </p>
           <div className="mt-4 max-w-xs">
             <Field label="Starting quantity" htmlFor="startingQuantity" required error={errors.startingQuantity}>
-              <QuantityStepper id="startingQuantity" min={0} value={watch("startingQuantity")} onChange={(v) => setValue("startingQuantity", v)} />
+              <QuantityStepper id="startingQuantity" min={0} value={startingQuantity} onChange={(v) => setValue("startingQuantity", v)} />
             </Field>
           </div>
         </section>

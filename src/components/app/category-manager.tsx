@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LoaderCircle, Plus, Tags } from "lucide-react";
 import { createCategoryAction } from "@/app/actions/products";
@@ -10,7 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
 
 export function CategoryManager({ categories }: { categories: { id: string; name: string }[] }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +21,6 @@ export function CategoryManager({ categories }: { categories: { id: string; name
       if (!res.ok) return setError(res.fieldErrors?.name ?? res.error);
       toast.success(`Category "${res.data.name}" added`);
       setName("");
-      router.refresh();
     });
   };
 

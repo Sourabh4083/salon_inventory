@@ -11,7 +11,6 @@ import { ServicesManager } from "@/components/app/services-manager";
 import { listServices } from "@/lib/services/billing";
 
 export const metadata: Metadata = { title: "Settings" };
-export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   await requirePermissionPage("settings.manage");

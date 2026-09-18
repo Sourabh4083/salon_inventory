@@ -5,7 +5,6 @@ import { PageHeader } from "@/components/app/page-header";
 import { UsersManager } from "@/components/app/users-manager";
 
 export const metadata: Metadata = { title: "Users" };
-export const dynamic = "force-dynamic";
 
 export default async function UsersPage() {
   const me = await requirePermissionPage("user.manage");

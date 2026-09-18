@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Banknote, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { addSalaryPaymentAction, deleteSalaryPaymentAction } from "@/app/actions/employees";
@@ -53,7 +52,6 @@ export function SalaryPayments({
   currencySymbol: string;
 }) {
   const id = useId();
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [toDelete, setToDelete] = useState<SalaryPaymentDTO | null>(null);
   const [deleting, startDelete] = useTransition();
@@ -69,7 +67,6 @@ export function SalaryPayments({
       }
       toast.success("Payment removed", { description: formatMoney(p.amount, currencySymbol) });
       setToDelete(null);
-      router.refresh();
     });
   };
 
@@ -156,7 +153,6 @@ export function SalaryPayments({
 
 function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDTO; currencySymbol: string; close: () => void }) {
   const id = useId();
-  const router = useRouter();
   const [amount, setAmount] = useState(employee.monthlySalary ? trimMoney(employee.monthlySalary) : "");
   const [paidOn, setPaidOn] = useState(toDateParam(new Date()));
   const [periodMonth, setPeriodMonth] = useState(currentMonth());
@@ -179,7 +175,6 @@ function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDT
       }
       toast.success("Salary payment recorded", { description: `${formatMoney(res.data.amount, currencySymbol)} · ${employee.name}` });
       close();
-      router.refresh();
     });
   };
 

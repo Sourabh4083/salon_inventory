@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { FileBadge, FileText, LoaderCircle, Trash2, Upload } from "lucide-react";
 import { deleteEmployeeDocumentAction, uploadEmployeeDocumentAction } from "@/app/actions/employees";
@@ -29,7 +28,6 @@ function formatSize(bytes: number) {
 }
 
 export function EmployeeDocuments({ employeeId, documents }: { employeeId: string; documents: EmployeeDocumentDTO[] }) {
-  const router = useRouter();
   const id = useId();
   const fileRef = useRef<HTMLInputElement>(null);
   const [kind, setKind] = useState<keyof typeof EMPLOYEE_DOC_KIND_LABEL>(
@@ -61,7 +59,6 @@ export function EmployeeDocuments({ employeeId, documents }: { employeeId: strin
       toast.success("Document uploaded", { description: `${EMPLOYEE_DOC_KIND_LABEL[res.data.kind]} · ${res.data.fileName}` });
       if (fileRef.current) fileRef.current.value = "";
       setFileName(null);
-      router.refresh();
     });
   };
 
@@ -76,7 +73,6 @@ export function EmployeeDocuments({ employeeId, documents }: { employeeId: strin
       }
       toast.success("Document deleted", { description: doc.fileName });
       setToDelete(null);
-      router.refresh();
     });
   };
 

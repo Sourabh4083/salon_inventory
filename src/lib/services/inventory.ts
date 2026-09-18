@@ -30,8 +30,8 @@ async function loadResult(productId: string, movementId: string): Promise<StockC
  * changes are serialised and every movement records accurate before/after values.
  */
 export async function lockProduct(tx: Prisma.TransactionClient, productId: string) {
-  const rows = await tx.$queryRaw<{ id: string; quantity: number; status: string; name: string }[]>`
-    SELECT id, quantity, status, name FROM "Product" WHERE id = ${productId} FOR UPDATE`;
+  const rows = await tx.$queryRaw<{ id: string; quantity: number; status: string; name: string; costPrice: string | null }[]>`
+    SELECT id, quantity, status, name, "costPrice"::text AS "costPrice" FROM "Product" WHERE id = ${productId} FOR UPDATE`;
   const row = rows[0];
   if (!row) throw new AppError("Product not found.", "NOT_FOUND");
   return row;
@@ -48,6 +48,7 @@ export async function applyChange(
     unitCost?: string | null;
     note?: string | null;
     actorId: string;
+    billId?: string | null;
   },
 ) {
   if (args.newQuantity < 0) throw new AppError("Stock cannot become negative.");
@@ -65,6 +66,7 @@ export async function applyChange(
       unitCost: args.unitCost ?? null,
       note: args.note ?? null,
       performedById: args.actorId,
+      billId: args.billId ?? null,
     },
   });
 }

@@ -8,7 +8,6 @@ import { ProductFilters } from "@/components/app/product-filters";
 import { ProductList } from "@/components/app/product-list";
 
 export const metadata: Metadata = { title: "Low Stock" };
-export const dynamic = "force-dynamic";
 
 export default async function LowStockPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
   const user = await requireUserPage();

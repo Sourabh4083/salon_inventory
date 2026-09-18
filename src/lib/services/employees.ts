@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { EmployeeDocumentKind, PaymentMethod } from "@/generated/prisma/enums";
@@ -158,17 +159,17 @@ export async function listEmployees(params: { q?: string; status?: EmployeeStatu
   return rows.map(toEmployeeDTO);
 }
 
-export async function getEmployee(id: string, actor: SessionUser): Promise<EmployeeDetail | null> {
+/** Deduplicated per request (generateMetadata and the page both read it). */
+export const getEmployee = cache(async (id: string, actor: SessionUser): Promise<EmployeeDetail | null> => {
   assertOwner(actor);
-  const row = await prisma.employee.findUnique({ where: { id }, include: employeeInclude });
-  if (!row) return null;
-  const yearStart = new Date(new Date().getFullYear(), 0, 1);
-  const [documents, payments, yearRows] = await Promise.all([
+  const [row, documents, payments] = await Promise.all([
+    prisma.employee.findUnique({ where: { id }, include: employeeInclude }),
     prisma.employeeDocument.findMany({ where: { employeeId: id }, orderBy: { createdAt: "asc" }, select: documentSelect }),
     prisma.salaryPayment.findMany({ where: { employeeId: id }, orderBy: [{ paidOn: "desc" }, { createdAt: "desc" }], include: paymentInclude }),
-    prisma.salaryPayment.findMany({ where: { employeeId: id, paidOn: { gte: yearStart } }, select: { amount: true } }),
   ]);
-  const paidThisYear = yearRows.reduce((sum, p) => sum + toPaise(p.amount.toString()), 0);
+  if (!row) return null;
+  const yearStart = new Date(new Date().getFullYear(), 0, 1);
+  const paidThisYear = payments.reduce((sum, p) => (p.paidOn >= yearStart ? sum + toPaise(p.amount.toString()) : sum), 0);
   return {
     employee: toEmployeeDTO(row),
     documents: documents.map(toDocumentDTO),
@@ -176,7 +177,7 @@ export async function getEmployee(id: string, actor: SessionUser): Promise<Emplo
     paidThisYear: fromPaise(paidThisYear),
     lastPaidOn: payments[0]?.paidOn.toISOString() ?? null,
   };
-}
+});
 
 /* ---------- Mutations ---------- */
 

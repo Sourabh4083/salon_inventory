@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LoaderCircle, Pencil, Save, Tags } from "lucide-react";
 import { updateProductPricesAction } from "@/app/actions/products";
@@ -156,7 +155,6 @@ function EditPricesDialog({ product, currencySymbol, onOpenChange }: { product: 
 }
 
 function EditPricesForm({ product, currencySymbol, close }: { product: ProductDTO; currencySymbol: string; close: () => void }) {
-  const router = useRouter();
   const [cost, setCost] = useState(product.costPrice ? trimMoney(product.costPrice) : "");
   const [selling, setSelling] = useState(product.sellingPrice ? trimMoney(product.sellingPrice) : "");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
@@ -179,7 +177,6 @@ function EditPricesForm({ product, currencySymbol, close }: { product: ProductDT
         description: `${res.data.name} · cost ${formatMoney(res.data.costPrice, currencySymbol)} · selling ${formatMoney(res.data.sellingPrice, currencySymbol)}`,
       });
       close();
-      router.refresh();
     });
   };
 

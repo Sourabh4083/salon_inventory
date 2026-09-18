@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LoaderCircle, Pencil, UserCheck, UserX } from "lucide-react";
 import { setEmployeeActiveAction } from "@/app/actions/employees";
@@ -20,7 +19,6 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export function EmployeeDetailActions({ employee }: { employee: EmployeeDTO }) {
-  const router = useRouter();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, start] = useTransition();
   const active = employee.isActive;
@@ -34,7 +32,6 @@ export function EmployeeDetailActions({ employee }: { employee: EmployeeDTO }) {
       }
       toast.success(active ? "Employee marked as left" : "Employee reactivated", { description: employee.name });
       setConfirmOpen(false);
-      router.refresh();
     });
   };
 

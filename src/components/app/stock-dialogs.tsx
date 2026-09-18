@@ -1,7 +1,6 @@
 "use client";
 
 import { useId, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { ArrowDownToLine, ClipboardCheck, LoaderCircle, ShoppingBag } from "lucide-react";
 import { adjustStockAction, saleAction, stockInAction } from "@/app/actions/inventory";
@@ -71,7 +70,6 @@ function FooterButtons({ pending, disabled, close, icon, label }: { pending: boo
 /* ---------------- SELL / REDUCE STOCK ---------------- */
 
 function SellForm({ product, close, onDone }: FormProps) {
-  const router = useRouter();
   const id = useId();
   const [qty, setQty] = useState("1");
   const [note, setNote] = useState("");
@@ -95,7 +93,6 @@ function SellForm({ product, close, onDone }: FormProps) {
       });
       close();
       onDone?.(res.data.product);
-      router.refresh();
     });
   };
 
@@ -143,7 +140,6 @@ export function SellDialog({ product, open, onOpenChange, onDone }: BaseProps) {
 /* ---------------- ADD STOCK ---------------- */
 
 function StockInForm({ product, close, onDone }: FormProps) {
-  const router = useRouter();
   const id = useId();
   const [qty, setQty] = useState("1");
   const canSeeCost = useCan("product.cost.view");
@@ -169,7 +165,6 @@ function StockInForm({ product, close, onDone }: FormProps) {
       });
       close();
       onDone?.(res.data.product);
-      router.refresh();
     });
   };
 
@@ -216,7 +211,6 @@ export function StockInDialog({ product, open, onOpenChange, onDone }: BaseProps
 /* ---------------- ADJUST STOCK ---------------- */
 
 function AdjustForm({ product, close, onDone }: FormProps) {
-  const router = useRouter();
   const id = useId();
   const [qty, setQty] = useState(String(product.quantity));
   const [reason, setReason] = useState("");
@@ -243,7 +237,6 @@ function AdjustForm({ product, close, onDone }: FormProps) {
       });
       close();
       onDone?.(res.data.product);
-      router.refresh();
     });
   };
 

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { DEFAULT_LOW_STOCK_THRESHOLD } from "@/lib/stock-status";
 
@@ -15,8 +16,11 @@ const DEFAULTS: BusinessSettingsData = {
   lowStockThreshold: DEFAULT_LOW_STOCK_THRESHOLD,
 };
 
-/** Returns the single settings row, creating it with defaults on first use. */
-export async function getSettings(): Promise<BusinessSettingsData> {
+/**
+ * Returns the single settings row, creating it with defaults on first use.
+ * Deduplicated per request: the layout, page and services all read it.
+ */
+export const getSettings = cache(async (): Promise<BusinessSettingsData> => {
   const row =
     (await prisma.businessSettings.findUnique({ where: { id: "default" } })) ??
     (await prisma.businessSettings.upsert({
@@ -30,7 +34,7 @@ export async function getSettings(): Promise<BusinessSettingsData> {
     currencySymbol: row.currencySymbol,
     lowStockThreshold: row.lowStockThreshold,
   };
-}
+});
 
 export async function updateSettings(data: BusinessSettingsData, actorId: string) {
   const before = await getSettings();

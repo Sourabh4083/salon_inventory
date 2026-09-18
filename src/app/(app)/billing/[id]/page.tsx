@@ -13,12 +13,11 @@ import { BillStatusBadge } from "@/components/app/bill-badges";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Bill" };
-export const dynamic = "force-dynamic";
 
 export default async function BillDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ new?: string }> }) {
   const user = await requirePermissionPage("bill.view");
-  const [{ id }, { new: isNew }, settings] = await Promise.all([params, searchParams, getSettings()]);
-  const bill = await getBill(id);
+  const [{ id }, { new: isNew }] = await Promise.all([params, searchParams]);
+  const [settings, bill] = await Promise.all([getSettings(), getBill(id)]);
   if (!bill) notFound();
 
   return (

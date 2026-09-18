@@ -15,7 +15,6 @@ import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Bills" };
-export const dynamic = "force-dynamic";
 
 const STATUSES = new Set<BillStatus>(["COMPLETED", "CANCELLED"]);
 

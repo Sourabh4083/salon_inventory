@@ -9,7 +9,6 @@ import { PageHeader } from "@/components/app/page-header";
 import { ProductForm } from "@/components/app/product-form";
 
 export const metadata: Metadata = { title: "Edit Product" };
-export const dynamic = "force-dynamic";
 
 export default async function EditProductPage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermissionPage("product.edit");

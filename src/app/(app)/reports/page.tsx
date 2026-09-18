@@ -13,7 +13,6 @@ import { PAYMENT_LABEL } from "@/components/app/bill-badges";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Sales Reports" };
-export const dynamic = "force-dynamic";
 
 export default async function ReportsPage({ searchParams }: { searchParams: Promise<{ range?: string; from?: string; to?: string }> }) {
   await requirePermissionPage("report.view");

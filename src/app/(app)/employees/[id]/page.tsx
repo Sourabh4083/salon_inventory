@@ -11,8 +11,6 @@ import { EmployeeDocuments } from "@/components/app/employee-documents";
 import { SalaryPayments } from "@/components/app/salary-payments";
 import { AadhaarNumber } from "@/components/app/aadhaar-number";
 
-export const dynamic = "force-dynamic";
-
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
   const user = await requirePermissionPage("employee.manage");
   const { id } = await params;

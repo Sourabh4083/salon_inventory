@@ -8,8 +8,7 @@ import { listProducts, productsForViewer } from "@/lib/services/products";
 import { getSalesReport } from "@/lib/services/billing";
 import { resolveRange } from "@/lib/dates";
 import { can } from "@/lib/permissions";
-import { formatMoney } from "@/lib/format";
-import { formatNumber } from "@/lib/format";
+import { formatMoney, formatNumber } from "@/lib/format";
 import { PageHeader } from "@/components/app/page-header";
 import { QuickActions } from "@/components/app/quick-actions";
 import { MovementList } from "@/components/app/movement-list";
@@ -18,7 +17,6 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Dashboard" };
-export const dynamic = "force-dynamic";
 
 function greeting() {
   const h = new Date().getHours();
@@ -35,8 +33,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     getDashboardStats(),
     listProducts({ stockStatus: "LOW_STOCK", sort: "quantity", pageSize: 6 }),
     listProducts({ stockStatus: "OUT_OF_STOCK", sort: "updated", pageSize: 6 }),
-    showActivity ? listMovements({ pageSize: 8 }) : Promise.resolve(null),
-    showSales ? getSalesReport(resolveRange({ range: "today" })) : Promise.resolve(null),
+    showActivity ? listMovements({ pageSize: 8 }) : null,
+    showSales ? getSalesReport(resolveRange({ range: "today" })) : null,
   ]);
 
   const kpis = [
@@ -113,7 +111,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               View all <ArrowRight />
             </Button>
           </div>
-          <DashboardStockList products={productsForViewer(low.items, user.role)} total={low.total} currencySymbol={settings.currencySymbol} emptyText="Nothing is running low. Nice." kind="low" />
+          <DashboardStockList products={productsForViewer(low.items, user.role)} total={low.total} emptyText="Nothing is running low. Nice." kind="low" />
         </section>
 
         <section className="space-y-3" aria-labelledby="out-heading">
@@ -125,7 +123,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               View all <ArrowRight />
             </Button>
           </div>
-          <DashboardStockList products={productsForViewer(out.items, user.role)} total={out.total} currencySymbol={settings.currencySymbol} emptyText="Everything is in stock." kind="out" />
+          <DashboardStockList products={productsForViewer(out.items, user.role)} total={out.total} emptyText="Everything is in stock." kind="out" />
         </section>
 
         {recent ? (

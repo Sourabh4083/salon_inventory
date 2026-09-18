@@ -174,6 +174,15 @@ describe("search", () => {
     const out = await listProducts({ stockStatus: "OUT_OF_STOCK" });
     expect(out.items.map((p) => p.name)).toContain("Tic Tac");
   });
+
+  it("filters by stock status honouring per-product thresholds", async () => {
+    const custom = await createProduct(input({ name: "Custom Threshold Wig", startingQuantity: 7, lowStockThreshold: 10 }), owner);
+    const plain = await createProduct(input({ name: "Default Threshold Wig", startingQuantity: 7 }), owner);
+    const names = async (stockStatus: "LOW_STOCK" | "IN_STOCK") =>
+      (await listProducts({ stockStatus, search: "Threshold Wig", pageSize: 100 })).items.map((p) => p.name);
+    expect(await names("LOW_STOCK")).toEqual([custom.name]); // 7 <= 10 (own threshold)
+    expect(await names("IN_STOCK")).toEqual([plain.name]); // 7 > shop default
+  });
 });
 
 describe("archive", () => {

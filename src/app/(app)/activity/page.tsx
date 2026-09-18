@@ -11,7 +11,6 @@ import { EmptyState } from "@/components/app/empty-state";
 import { ActivityFilter } from "@/components/app/activity-filter";
 
 export const metadata: Metadata = { title: "Stock Activity" };
-export const dynamic = "force-dynamic";
 
 const TYPES = new Set<MovementType>(["INITIAL_STOCK", "STOCK_IN", "SALE", "ADJUSTMENT", "BILL_CANCELLED"]);
 

@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { Prisma } from "@/generated/prisma/client";
 import type { MovementType, ProductStatus, Role, Unit } from "@/generated/prisma/enums";
@@ -160,21 +161,24 @@ async function nextProductNumber(tx: Prisma.TransactionClient) {
   return `PRD-${String(n).padStart(6, "0")}`;
 }
 
-/** Ids of active products that are LOW (1..threshold) or OUT (0), honouring per-product overrides. */
-async function idsByStockStatus(status: StockStatus, globalThreshold: number): Promise<string[]> {
-  let rows: { id: string }[];
-  if (status === "OUT_OF_STOCK") {
-    rows = await prisma.$queryRaw<{ id: string }[]>`SELECT id FROM "Product" WHERE status = 'ACTIVE' AND quantity <= 0`;
-  } else if (status === "LOW_STOCK") {
-    rows = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM "Product"
-      WHERE status = 'ACTIVE' AND quantity >= 1 AND quantity <= COALESCE("lowStockThreshold", ${globalThreshold})`;
-  } else {
-    rows = await prisma.$queryRaw<{ id: string }[]>`
-      SELECT id FROM "Product"
-      WHERE status = 'ACTIVE' AND quantity > COALESCE("lowStockThreshold", ${globalThreshold})`;
+/**
+ * Active products that are LOW (1..threshold) or OUT (0), honouring per-product
+ * overrides: the effective threshold is COALESCE("lowStockThreshold", global).
+ */
+function stockStatusWhere(status: StockStatus, globalThreshold: number): Prisma.ProductWhereInput {
+  const own = prisma.product.fields.lowStockThreshold;
+  if (status === "OUT_OF_STOCK") return { status: "ACTIVE", quantity: { lte: 0 } };
+  if (status === "LOW_STOCK") {
+    return {
+      status: "ACTIVE",
+      quantity: { gte: 1 },
+      OR: [{ lowStockThreshold: null, quantity: { lte: globalThreshold } }, { quantity: { lte: own } }],
+    };
   }
-  return rows.map((r) => r.id);
+  return {
+    status: "ACTIVE",
+    OR: [{ lowStockThreshold: null, quantity: { gt: globalThreshold } }, { quantity: { gt: own } }],
+  };
 }
 
 /* ---------- Queries ---------- */
@@ -203,7 +207,7 @@ export async function listProducts(params: ListProductsParams = {}) {
   if (params.archivedOnly) where.status = "ARCHIVED";
   else if (!params.includeArchived) where.status = "ACTIVE";
   if (params.categoryId) where.categoryId = params.categoryId;
-  if (params.stockStatus) where.id = { in: await idsByStockStatus(params.stockStatus, settings.lowStockThreshold) };
+  if (params.stockStatus) where.AND = [stockStatusWhere(params.stockStatus, settings.lowStockThreshold)];
   if (search) {
     where.OR = [
       { name: { contains: search, mode: "insensitive" } },
@@ -243,13 +247,14 @@ export async function listProducts(params: ListProductsParams = {}) {
   return { items, total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
 }
 
-export async function getProduct(id: string): Promise<ProductDTO | null> {
+/** Deduplicated per request (generateMetadata and the page both read it). */
+export const getProduct = cache(async (id: string): Promise<ProductDTO | null> => {
   const [settings, row] = await Promise.all([
     getSettings(),
     prisma.product.findUnique({ where: { id }, include: productInclude }),
   ]);
   return row ? toProductDTO(row, settings.lowStockThreshold) : null;
-}
+});
 
 /** Exact barcode lookup (used by scanner). Also accepts SKU or product number as a fallback. */
 export async function findProductByCode(code: string): Promise<ProductDTO | null> {

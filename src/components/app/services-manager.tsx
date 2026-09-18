@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Check, LoaderCircle, Pencil, Plus, Scissors, X } from "lucide-react";
 import { createServiceAction, updateServiceAction } from "@/app/actions/billing";
@@ -15,7 +14,6 @@ import { Switch } from "@/components/ui/switch";
 import { Field } from "@/components/app/field";
 
 export function ServicesManager({ services, currencySymbol }: { services: ServiceDTO[]; currencySymbol: string }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [draft, setDraft] = useState({ name: "", price: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -32,7 +30,6 @@ export function ServicesManager({ services, currencySymbol }: { services: Servic
       }
       toast.success(`Service "${res.data.name}" added`);
       setDraft({ name: "", price: "" });
-      router.refresh();
     });
   };
 
@@ -46,7 +43,6 @@ export function ServicesManager({ services, currencySymbol }: { services: Servic
       }
       toast.success(`Service "${res.data.name}" updated`);
       setEditing(null);
-      router.refresh();
     });
   };
 
@@ -58,7 +54,6 @@ export function ServicesManager({ services, currencySymbol }: { services: Servic
         return;
       }
       toast.success(res.data.isActive ? `"${res.data.name}" is available on bills` : `"${res.data.name}" hidden from bills`);
-      router.refresh();
     });
   };
 

@@ -9,7 +9,6 @@ import { PageHeader } from "@/components/app/page-header";
 import { EmployeeForm } from "@/components/app/employee-form";
 
 export const metadata: Metadata = { title: "Edit Employee" };
-export const dynamic = "force-dynamic";
 
 export default async function EditEmployeePage({ params }: { params: Promise<{ id: string }> }) {
   const user = await requirePermissionPage("employee.manage");

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LoaderCircle, Save } from "lucide-react";
 import { updateSettingsAction } from "@/app/actions/settings";
@@ -11,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
 
 export function SettingsForm({ settings }: { settings: BusinessSettingsData }) {
-  const router = useRouter();
   const [pending, start] = useTransition();
   const [values, setValues] = useState({
     businessName: settings.businessName,
@@ -34,7 +32,6 @@ export function SettingsForm({ settings }: { settings: BusinessSettingsData }) {
         return;
       }
       toast.success("Settings saved", { description: `Low stock threshold is now ${res.data.lowStockThreshold}.` });
-      router.refresh();
     });
   };
 

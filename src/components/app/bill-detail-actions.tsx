@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Ban, LoaderCircle, Plus, Printer } from "lucide-react";
 import { cancelBillAction } from "@/app/actions/billing";
@@ -24,7 +23,6 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export function BillDetailActions({ bill, role }: { bill: BillDTO; role: Role }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +39,6 @@ export function BillDetailActions({ bill, role }: { bill: BillDTO; role: Role })
       }
       toast.success(`${bill.billNumber} cancelled`, { description: "Product stock has been put back." });
       setOpen(false);
-      router.refresh();
     });
   };
 

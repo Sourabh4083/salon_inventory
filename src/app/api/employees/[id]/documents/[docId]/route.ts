@@ -3,8 +3,6 @@ import { getCurrentUser } from "@/lib/auth/session";
 import { can } from "@/lib/permissions";
 import { getEmployeeDocumentFile } from "@/lib/services/employees";
 
-export const dynamic = "force-dynamic";
-
 /**
  * Serves an uploaded employee document (Aadhaar image / PDF) from the database.
  * Owner-only: the proxy already requires a login for /api, and this re-checks the
