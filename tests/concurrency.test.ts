@@ -2,7 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct, getProduct } from "@/lib/services/products";
 import { recordSale, recordStockIn } from "@/lib/services/inventory";
-import { productCreateSchema } from "@/lib/validation/schemas";
+import { createOrder, receiveOrder } from "@/lib/services/orders";
+import { orderCreateSchema, orderReceiveSchema, productCreateSchema } from "@/lib/validation/schemas";
 import { seedBasics } from "./helpers";
 import type { SessionUser } from "@/lib/auth/session";
 
@@ -60,5 +61,24 @@ describe("concurrent stock changes", () => {
     const sorted = [...movements].sort((a, b) => a.previousQuantity - b.previousQuantity || a.newQuantity - b.newQuantity);
     expect(final!.quantity).toBeGreaterThanOrEqual(0);
     expect(sorted.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("two people clicking Received on the same order add the stock only once", async () => {
+    const a = await createProduct(productCreateSchema.parse({ name: "Race A", categoryId, startingQuantity: 1 }), owner);
+    const b = await createProduct(productCreateSchema.parse({ name: "Race B", categoryId, startingQuantity: 0 }), owner);
+    const order = await createOrder(orderCreateSchema.parse({ items: [{ productId: a.id, quantity: 5 }, { productId: b.id, quantity: 3 }] }), owner);
+
+    const results = await Promise.allSettled([
+      receiveOrder(orderReceiveSchema.parse({ orderId: order.id, lines: "ALL" }), owner),
+      receiveOrder(orderReceiveSchema.parse({ orderId: order.id, lines: "ALL" }), manager),
+      receiveOrder(orderReceiveSchema.parse({ orderId: order.id, lines: "ALL" }), manager),
+    ]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    for (const r of results.filter((r) => r.status === "rejected")) {
+      expect((r as PromiseRejectedResult).reason.message).toMatch(/already been fully received/);
+    }
+    expect((await getProduct(a.id))?.quantity).toBe(6);
+    expect((await getProduct(b.id))?.quantity).toBe(3);
+    expect(await prisma.stockMovement.count({ where: { purchaseOrderId: order.id } })).toBe(2);
   });
 });

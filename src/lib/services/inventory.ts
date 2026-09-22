@@ -49,6 +49,7 @@ export async function applyChange(
     note?: string | null;
     actorId: string;
     billId?: string | null;
+    purchaseOrderId?: string | null;
   },
 ) {
   if (args.newQuantity < 0) throw new AppError("Stock cannot become negative.");
@@ -67,6 +68,7 @@ export async function applyChange(
       note: args.note ?? null,
       performedById: args.actorId,
       billId: args.billId ?? null,
+      purchaseOrderId: args.purchaseOrderId ?? null,
     },
   });
 }

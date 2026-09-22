@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowRight, Boxes, Package, PackageX, Receipt, TrendingUp } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, Boxes, Package, PackageX, Receipt, TrendingUp, Truck } from "lucide-react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getDashboardStats, listMovements } from "@/lib/services/inventory";
 import { listProducts, productsForViewer } from "@/lib/services/products";
 import { getSalesReport } from "@/lib/services/billing";
+import { countActiveOrders } from "@/lib/services/orders";
 import { resolveRange } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/format";
@@ -27,7 +28,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const user = await requireUserPage();
   const showSales = can(user.role, "report.view");
   const showActivity = can(user.role, "stock.history.view");
-  const [{ denied }, settings, stats, low, out, recent, today] = await Promise.all([
+  const [{ denied }, settings, stats, low, out, recent, today, activeOrders] = await Promise.all([
     searchParams,
     getSettings(),
     getDashboardStats(),
@@ -35,6 +36,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
     listProducts({ stockStatus: "OUT_OF_STOCK", sort: "updated", pageSize: 6 }),
     showActivity ? listMovements({ pageSize: 8 }) : null,
     showSales ? getSalesReport(resolveRange({ range: "today" })) : null,
+    can(user.role, "order.view") ? countActiveOrders() : 0,
   ]);
 
   const kpis = [
@@ -55,6 +57,19 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           That page is only available to the owner account.
         </p>
+      ) : null}
+
+      {activeOrders > 0 ? (
+        <Link href="/orders" className="group flex items-center gap-3 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sky-900 transition-shadow hover:shadow-md dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
+          <Truck className="size-5 shrink-0" />
+          <span className="flex-1 text-sm">
+            <span className="font-semibold">
+              {activeOrders} {activeOrders === 1 ? "order is" : "orders are"} waiting for delivery.
+            </span>{" "}
+            Click Received there when products arrive.
+          </span>
+          <ArrowRight className="size-4 shrink-0" />
+        </Link>
       ) : null}
 
       <section aria-label="Quick actions">

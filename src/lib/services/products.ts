@@ -56,6 +56,9 @@ export type MovementDTO = {
   performedByRole: string;
   /** Set when the movement came from a bill; null for manual stock changes. */
   billId: string | null;
+  /** Set when the movement booked in a product order delivery. */
+  purchaseOrderId: string | null;
+  orderNumber: string | null;
   createdAt: string;
 };
 
@@ -98,6 +101,7 @@ export function toProductDTO(p: ProductRow, globalThreshold: number): ProductDTO
 export const movementInclude = {
   product: { select: { name: true, productNumber: true } },
   performedBy: { select: { name: true, role: true } },
+  purchaseOrder: { select: { orderNumber: true } },
 } satisfies Prisma.StockMovementInclude;
 
 type MovementRow = Prisma.StockMovementGetPayload<{ include: typeof movementInclude }>;
@@ -118,6 +122,8 @@ export function toMovementDTO(m: MovementRow): MovementDTO {
     performedByName: m.performedBy.name,
     performedByRole: m.performedBy.role,
     billId: m.billId,
+    purchaseOrderId: m.purchaseOrderId,
+    orderNumber: m.purchaseOrder?.orderNumber ?? null,
     createdAt: m.createdAt.toISOString(),
   };
 }

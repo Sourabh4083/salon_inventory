@@ -193,6 +193,37 @@ export const serviceSchema = z.object({
 });
 export type ServiceInput = z.input<typeof serviceSchema>;
 
+// ---- Product orders ----
+
+export const orderItemSchema = z.object({
+  productId: z.string().min(1),
+  quantity: positiveQuantityInput,
+  unitCost: moneyInput,
+});
+
+export const orderCreateSchema = z.object({
+  items: z.array(orderItemSchema).min(1, "Add at least one product to the order.").max(200, "An order can have at most 200 products."),
+  notes: optionalText(500),
+});
+export type OrderCreateInput = z.input<typeof orderCreateSchema>;
+export type OrderCreateData = z.output<typeof orderCreateSchema>;
+
+export const orderReceiveSchema = z.object({
+  orderId: z.string().min(1),
+  /** "ALL" receives everything still pending; otherwise the quantity that arrived per line (0 = not arrived). */
+  lines: z.union([
+    z.literal("ALL"),
+    z.array(z.object({ itemId: z.string().min(1), quantity: quantityInput })).min(1),
+  ]),
+});
+export type OrderReceiveInput = z.input<typeof orderReceiveSchema>;
+export type OrderReceiveData = z.output<typeof orderReceiveSchema>;
+
+export const orderCloseSchema = z.object({
+  orderId: z.string().min(1),
+  reason: trimmed(300).min(3, "Give a short reason for closing."),
+});
+
 // ---- Employees (owner-only) ----
 
 /** "2026-09-18" -> midnight that day in the salon's zone | null. Blank allowed. */

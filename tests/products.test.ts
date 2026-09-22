@@ -107,8 +107,8 @@ describe("edit product", () => {
     expect(productForViewer(p, "MANAGER").costPrice).toBeNull();
     expect(productForViewer(p, "MANAGER").sellingPrice).toBe("100");
     expect(productForViewer(p, "OWNER").costPrice).toBe("60");
-    const movement = (await prisma.stockMovement.findFirstOrThrow({ where: { productId: p.id }, include: { product: { select: { name: true, productNumber: true } }, performedBy: { select: { name: true, role: true } } } }));
-    const { toMovementDTO } = await import("@/lib/services/products");
+    const { toMovementDTO, movementInclude } = await import("@/lib/services/products");
+    const movement = await prisma.stockMovement.findFirstOrThrow({ where: { productId: p.id }, include: movementInclude });
     const dto = toMovementDTO(movement);
     expect(dto.unitCost).toBe("60");
     expect(movementForViewer(dto, "MANAGER").unitCost).toBeNull();

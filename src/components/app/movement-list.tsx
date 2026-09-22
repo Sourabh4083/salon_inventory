@@ -94,7 +94,13 @@ export function MovementList({
                     {compact ? formatRelative(m.createdAt) : formatDateTime(m.createdAt)}
                   </time>
                 </p>
-                {m.note && !compact ? <p className="mt-1 text-xs text-muted-foreground italic">“{m.note}”</p> : null}
+                {m.purchaseOrderId && m.orderNumber ? (
+                  <Link href={`/orders/${m.purchaseOrderId}`} className="mt-1 inline-block text-xs font-medium text-primary hover:underline">
+                    From order {m.orderNumber}
+                  </Link>
+                ) : m.note && !compact ? (
+                  <p className="mt-1 text-xs text-muted-foreground italic">“{m.note}”</p>
+                ) : null}
               </div>
               <div className="shrink-0 text-right">
                 <QuantityChange value={m.quantityChange} className="text-base" />
