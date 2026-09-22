@@ -1,15 +1,23 @@
 import Link from "next/link";
-import { ArrowDownToLine, ClipboardCheck, PackagePlus, ShoppingBag, Undo2 } from "lucide-react";
+import { ArrowDownToLine, ClipboardCheck, PackageMinus, PackagePlus, ShoppingBag, Undo2 } from "lucide-react";
 import type { MovementDTO } from "@/lib/services/products";
 import type { MovementType } from "@/generated/prisma/enums";
-import { MOVEMENT_LABEL } from "@/lib/constants";
+import { movementLabel } from "@/lib/constants";
 import { formatDateTime, formatRelative, signedQuantity } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-const ICON: Record<MovementType, React.ComponentType<{ className?: string }>> = {
+/** A SALE with no bill is a manual reduction, so it gets its own icon and wording. */
+type IconKey = MovementType | "MANUAL_REDUCTION";
+
+function iconKey(type: MovementType, billId: string | null): IconKey {
+  return type === "SALE" && billId === null ? "MANUAL_REDUCTION" : type;
+}
+
+const ICON: Record<IconKey, React.ComponentType<{ className?: string }>> = {
   INITIAL_STOCK: PackagePlus,
   STOCK_IN: ArrowDownToLine,
   SALE: ShoppingBag,
+  MANUAL_REDUCTION: PackageMinus,
   ADJUSTMENT: ClipboardCheck,
   BILL_CANCELLED: Undo2,
 };
@@ -22,11 +30,11 @@ const TONE: Record<MovementType, string> = {
   BILL_CANCELLED: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
 };
 
-export function MovementTypeChip({ type }: { type: MovementType }) {
-  const Icon = ICON[type];
+export function MovementTypeChip({ type, billId }: { type: MovementType; billId: string | null }) {
+  const Icon = ICON[iconKey(type, billId)];
   return (
     <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase", TONE[type])}>
-      <Icon className="size-3" /> {MOVEMENT_LABEL[type]}
+      <Icon className="size-3" /> {movementLabel(type, billId)}
     </span>
   );
 }
@@ -64,7 +72,7 @@ export function MovementList({
         <li key={m.id} className="flex items-start gap-3 px-4 py-3">
           <span className={cn("mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full", TONE[m.type])}>
             {(() => {
-              const Icon = ICON[m.type];
+              const Icon = ICON[iconKey(m.type, m.billId)];
               return <Icon className="size-4" />;
             })()}
           </span>
@@ -76,10 +84,10 @@ export function MovementList({
                     {m.productName}
                   </Link>
                 ) : (
-                  <p className="font-medium">{MOVEMENT_LABEL[m.type]}</p>
+                  <p className="font-medium">{movementLabel(m.type, m.billId)}</p>
                 )}
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-                  {showProduct ? <MovementTypeChip type={m.type} /> : null}
+                  {showProduct ? <MovementTypeChip type={m.type} billId={m.billId} /> : null}
                   <span>{m.performedByName}</span>
                   <span aria-hidden>·</span>
                   <time dateTime={m.createdAt} title={formatDateTime(m.createdAt)}>

@@ -54,6 +54,8 @@ export type MovementDTO = {
   performedById: string;
   performedByName: string;
   performedByRole: string;
+  /** Set when the movement came from a bill; null for manual stock changes. */
+  billId: string | null;
   createdAt: string;
 };
 
@@ -115,6 +117,7 @@ export function toMovementDTO(m: MovementRow): MovementDTO {
     performedById: m.performedById,
     performedByName: m.performedBy.name,
     performedByRole: m.performedBy.role,
+    billId: m.billId,
     createdAt: m.createdAt.toISOString(),
   };
 }

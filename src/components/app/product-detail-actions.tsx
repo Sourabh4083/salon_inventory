@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Archive, ArchiveRestore, ArrowDownToLine, ClipboardCheck, LoaderCircle, Pencil, ShoppingBag, Trash2 } from "lucide-react";
+import { Archive, ArchiveRestore, ArrowDownToLine, ClipboardCheck, LoaderCircle, PackageMinus, Pencil, Trash2 } from "lucide-react";
 import { archiveProductAction, deleteProductAction, restoreProductAction } from "@/app/actions/products";
 import type { ProductDTO } from "@/lib/services/products";
 import type { Role } from "@/generated/prisma/enums";
@@ -61,15 +61,17 @@ export function ProductDetailActions({ product, role }: { product: ProductDTO; r
   return (
     <>
       <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-        <Button size="lg" className="h-12 text-base sm:h-11 sm:text-sm" onClick={() => openDialog("sale", product)} disabled={archived || product.quantity === 0}>
-          <ShoppingBag /> Reduce stock (no bill)
+        <Button size="lg" variant="secondary" className="h-12 text-base sm:h-11 sm:text-sm" onClick={() => openDialog("sale", product)} disabled={archived || product.quantity === 0}>
+          <PackageMinus /> Reduce stock
         </Button>
-        <Button size="lg" variant="secondary" className="h-12 text-base sm:h-11 sm:text-sm" onClick={() => openDialog("stockIn", product)} disabled={archived}>
+        <Button size="lg"  className="h-12 text-base sm:h-11 sm:text-sm" onClick={() => openDialog("stockIn", product)} disabled={archived}>
           <ArrowDownToLine /> Add stock
         </Button>
-        <Button size="lg" variant="outline" className="h-11" onClick={() => openDialog("adjust", product)} disabled={archived}>
-          <ClipboardCheck /> Adjust stock
-        </Button>
+        {can(role, "stock.adjust") ? (
+          <Button size="lg" variant="outline" className="h-11" onClick={() => openDialog("adjust", product)} disabled={archived}>
+            <ClipboardCheck /> Adjust stock
+          </Button>
+        ) : null}
         {can(role, "product.edit") && (!archived || role === "OWNER") ? (
           <Button size="lg" variant="outline" className="h-11" render={<Link href={`/inventory/${product.id}/edit`} />}>
             <Pencil /> Edit product

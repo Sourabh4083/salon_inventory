@@ -30,13 +30,15 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "product.edit",
   "stock.in",
   "stock.sale",
-  "stock.adjust",
   "bill.create",
   "bill.view",
 ];
 
 const OWNER_PERMISSIONS: Permission[] = [
   ...MANAGER_PERMISSIONS,
+  // Owner-only: an adjustment rewrites the counted quantity in either direction,
+  // so it stays with the person who reviews Stock Activity.
+  "stock.adjust",
   "product.archive",
   "product.delete",
   "user.manage",

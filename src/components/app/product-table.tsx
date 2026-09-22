@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDownToLine, ClipboardCheck, MoreHorizontal, Pencil, ShoppingBag } from "lucide-react";
+import { ArrowDownToLine, ClipboardCheck, MoreHorizontal, PackageMinus, Pencil } from "lucide-react";
 import type { ProductDTO } from "@/lib/services/products";
 import { formatMoney, formatRelative } from "@/lib/format";
 import { Button } from "@/components/ui/button";
+import { useCan } from "@/components/app/role-context";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu,
@@ -27,6 +28,7 @@ export function ProductTable({
   onAction: (kind: StockDialogKind, product: ProductDTO) => void;
   highlightId?: string | null;
 }) {
+  const canAdjust = useCan("stock.adjust");
   return (
     <div className="overflow-hidden rounded-2xl border bg-card shadow-xs">
       <div className="overflow-x-auto">
@@ -66,13 +68,14 @@ export function ProductTable({
                   <div className="flex items-center justify-end gap-1.5">
                     <Button
                       size="sm"
+                      variant="secondary"
                       onClick={() => onAction("sale", p)}
                       disabled={p.quantity === 0 || p.status === "ARCHIVED"}
-                      title="Record sale"
+                      title="Reduce stock without a bill"
                     >
-                      <ShoppingBag /> Sell
+                      <PackageMinus /> Reduce
                     </Button>
-                    <Button size="sm" variant="secondary" onClick={() => onAction("stockIn", p)} disabled={p.status === "ARCHIVED"} title="Add stock">
+                    <Button size="sm"  onClick={() => onAction("stockIn", p)} disabled={p.status === "ARCHIVED"} title="Add stock">
                       <ArrowDownToLine /> Stock
                     </Button>
                     <DropdownMenu>
@@ -84,10 +87,14 @@ export function ProductTable({
                         <DropdownMenuItem render={<Link href={`/inventory/${p.id}/edit`} />}>
                           <Pencil /> Edit product
                         </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => onAction("adjust", p)} disabled={p.status === "ARCHIVED"}>
-                          <ClipboardCheck /> Adjust stock
-                        </DropdownMenuItem>
+                        {canAdjust ? (
+                          <>
+                            <DropdownMenuSeparator />
+                            <DropdownMenuItem onClick={() => onAction("adjust", p)} disabled={p.status === "ARCHIVED"}>
+                              <ClipboardCheck /> Adjust stock
+                            </DropdownMenuItem>
+                          </>
+                        ) : null}
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>

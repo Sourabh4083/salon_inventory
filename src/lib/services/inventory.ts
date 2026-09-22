@@ -93,9 +93,11 @@ export async function recordStockIn(
 }
 
 /**
- * - SELL / REDUCE STOCK.
+ * - REDUCE STOCK: stock that left without a bill (salon use, damage, expiry).
+ * Writes MovementType.SALE with no billId; billing writes the same type WITH one,
+ * which is how the history tells a real sale from a manual reduction.
  * The availability check happens inside the transaction on a locked row, so two
- * simultaneous sales of the last unit cannot both succeed.
+ * simultaneous reductions of the last unit cannot both succeed.
  */
 export async function recordSale(
   input: { productId: string; quantity: number; note?: string | null },
@@ -104,14 +106,14 @@ export async function recordSale(
   if (!Number.isInteger(input.quantity) || input.quantity < 1) throw new AppError("Quantity must be at least 1.");
   const movement = await prisma.$transaction(async (tx) => {
     const current = await lockProduct(tx, input.productId);
-    if (current.status !== "ACTIVE") throw new AppError("This product is archived and cannot be sold.");
+    if (current.status !== "ACTIVE") throw new AppError("This product is archived. Restore it before changing its stock.");
     if (current.quantity < input.quantity) throw new InsufficientStockError(current.quantity);
     return applyChange(tx, {
       productId: current.id,
       type: "SALE",
       previousQuantity: current.quantity,
       newQuantity: current.quantity - input.quantity,
-      note: input.note ?? "Sold",
+      note: input.note ?? "Stock reduced",
       actorId: actor.id,
     });
   });

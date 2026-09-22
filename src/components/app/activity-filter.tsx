@@ -2,7 +2,7 @@
 
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { NativeSelect } from "@/components/app/native-select";
-import { MOVEMENT_LABEL } from "@/lib/constants";
+import { MOVEMENT_FILTER_LABEL } from "@/lib/constants";
 
 export function ActivityFilter() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export function ActivityFilter() {
       className="h-11 w-full bg-card sm:w-48"
     >
       <option value="">All movements</option>
-      {Object.entries(MOVEMENT_LABEL).map(([value, label]) => (
+      {Object.entries(MOVEMENT_FILTER_LABEL).map(([value, label]) => (
         <option key={value} value={value}>
           {label}
         </option>

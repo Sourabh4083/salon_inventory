@@ -9,7 +9,7 @@ describe("role permissions", () => {
   });
 
   it("manager can run daily inventory", () => {
-    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "stock.adjust", "bill.create", "bill.view"] as const) {
+    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "bill.create", "bill.view"] as const) {
       expect(can("MANAGER", p)).toBe(true);
     }
   });
@@ -20,8 +20,8 @@ describe("role permissions", () => {
     }
   });
 
-  it("manager cannot see cost prices, edit prices, view stock activity or manage employees", () => {
-    for (const p of ["product.cost.view", "product.price.edit", "stock.history.view", "employee.manage"] as const) {
+  it("manager cannot adjust stock, see cost prices, edit prices, view stock activity or manage employees", () => {
+    for (const p of ["stock.adjust", "product.cost.view", "product.price.edit", "stock.history.view", "employee.manage"] as const) {
       expect(can("MANAGER", p)).toBe(false);
     }
     expect(MANAGER_EDITABLE_PRODUCT_FIELDS.has("costPrice")).toBe(false);
