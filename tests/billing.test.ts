@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct, getProduct } from "@/lib/services/products";
 import { cancelBill, createBill, createService, getSalesReport, listBills, listServices, updateService } from "@/lib/services/billing";
+import { toDateParam } from "@/lib/dates";
 import { billCreateSchema, productCreateSchema } from "@/lib/validation/schemas";
 import { seedBasics } from "./helpers";
 import type { SessionUser } from "@/lib/auth/session";
@@ -176,6 +177,8 @@ describe("sales report", () => {
     expect(report.grossProfit).toBe("350.00");
     expect(report.byPayment.find((b) => b.method === "CARD")?.amount).toBe("1900.00");
     expect(report.byDay).toHaveLength(1);
+    // Bucketed on the salon's calendar day, whatever zone the host runs in.
+    expect(report.byDay[0].date).toBe(toDateParam(now));
     expect(report.topProducts[0]).toMatchObject({ name: "Report Serum", quantity: 2, amount: "1000.00" });
     expect(report.topServices[0]).toMatchObject({ name: "Styling", quantity: 1, amount: "1000.00" });
   });

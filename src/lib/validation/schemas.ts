@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { zonedDate } from "@/lib/timezone";
 
 const UNIT_VALUES = ["PIECE", "PACK", "BOX", "BOTTLE", "ROLL", "SET", "PAIR", "METER"] as const;
 
@@ -194,7 +195,7 @@ export type ServiceInput = z.input<typeof serviceSchema>;
 
 // ---- Employees (owner-only) ----
 
-/** "2026-09-18" -> Date (local midnight) | null. Blank allowed. */
+/** "2026-09-18" -> midnight that day in the salon's zone | null. Blank allowed. */
 const optionalDateInput = z
   .string()
   .trim()
@@ -205,7 +206,8 @@ const optionalDateInput = z
       ctx.addIssue({ code: "custom", message: "Enter a date as YYYY-MM-DD." });
       return z.NEVER;
     }
-    const d = new Date(`${v}T00:00:00`);
+    const [y, mo, day] = v.split("-").map(Number);
+    const d = zonedDate(y, mo, day);
     if (Number.isNaN(d.getTime())) {
       ctx.addIssue({ code: "custom", message: "Enter a valid date." });
       return z.NEVER;
@@ -222,7 +224,8 @@ const requiredDateInput = z
       ctx.addIssue({ code: "custom", message: "Enter a date as YYYY-MM-DD." });
       return z.NEVER;
     }
-    const d = new Date(`${v}T00:00:00`);
+    const [y, mo, day] = v.split("-").map(Number);
+    const d = zonedDate(y, mo, day);
     if (Number.isNaN(d.getTime())) {
       ctx.addIssue({ code: "custom", message: "Enter a valid date." });
       return z.NEVER;
