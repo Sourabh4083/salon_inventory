@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LoaderCircle, Search } from "lucide-react";
 import { quickSearchProductsAction } from "@/app/actions/products";
+import type { ActionResult } from "@/lib/errors";
 import type { ProductDTO } from "@/lib/services/products";
 import { formatMoney } from "@/lib/format";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -17,6 +18,8 @@ type PickerProps = {
   currencySymbol: string;
   onPick: (product: ProductDTO) => void;
   disableOutOfStock?: boolean;
+  /** Where results come from; defaults to the general product search. */
+  search?: (query: string) => Promise<ActionResult<ProductDTO[]>>;
 };
 
 /**
@@ -38,7 +41,7 @@ export function ProductPickerDialog({ open, onOpenChange, title, description, ..
   );
 }
 
-function PickerBody({ currencySymbol, onPick, disableOutOfStock }: Pick<PickerProps, "currencySymbol" | "onPick" | "disableOutOfStock">) {
+function PickerBody({ currencySymbol, onPick, disableOutOfStock, search = quickSearchProductsAction }: Pick<PickerProps, "currencySymbol" | "onPick" | "disableOutOfStock" | "search">) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductDTO[] | null>(null);
   const seq = useRef(0);
@@ -46,12 +49,12 @@ function PickerBody({ currencySymbol, onPick, disableOutOfStock }: Pick<PickerPr
   useEffect(() => {
     const id = ++seq.current;
     const t = setTimeout(async () => {
-      const res = await quickSearchProductsAction(query);
+      const res = await search(query);
       if (seq.current !== id) return;
       setResults(res.ok ? res.data : []);
     }, query ? 200 : 0);
     return () => clearTimeout(t);
-  }, [query]);
+  }, [query, search]);
 
   const loading = results === null;
 

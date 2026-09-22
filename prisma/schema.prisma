@@ -43,6 +43,12 @@ enum BillItemKind {
   SERVICE
 }
 
+enum OrderStatus {
+  ACTIVE
+  RECEIVED
+  CLOSED
+}
+
 enum EmployeeDocumentKind {
   AADHAAR_FRONT
   AADHAAR_BACK
@@ -80,6 +86,8 @@ model User {
   updatedEmployees  Employee[]         @relation("EmployeeUpdatedBy")
   uploadedDocuments EmployeeDocument[] @relation("EmployeeDocumentUploadedBy")
   salaryPayments    SalaryPayment[]    @relation("SalaryPaymentCreatedBy")
+  createdOrders     PurchaseOrder[]    @relation("OrderCreatedBy")
+  closedOrders      PurchaseOrder[]    @relation("OrderClosedBy")
 
   @@index([role, isActive])
 }
@@ -117,8 +125,9 @@ model Product {
   category  Category        @relation(fields: [categoryId], references: [id])
   createdBy User?           @relation("ProductCreatedBy", fields: [createdById], references: [id])
   updatedBy User?           @relation("ProductUpdatedBy", fields: [updatedById], references: [id])
-  movements StockMovement[]
-  billItems BillItem[]
+  movements  StockMovement[]
+  billItems  BillItem[]
+  orderItems PurchaseOrderItem[]
 
   @@index([name])
   @@index([status, quantity])
@@ -137,16 +146,19 @@ model StockMovement {
   note             String?
   performedById    String
   billId           String?
+  purchaseOrderId  String?
   createdAt        DateTime     @default(now())
 
-  product     Product @relation(fields: [productId], references: [id])
-  performedBy User    @relation(fields: [performedById], references: [id])
-  bill        Bill?   @relation(fields: [billId], references: [id])
+  product       Product        @relation(fields: [productId], references: [id])
+  performedBy   User           @relation(fields: [performedById], references: [id])
+  bill          Bill?          @relation(fields: [billId], references: [id])
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id])
 
   @@index([productId, createdAt])
   @@index([createdAt])
   @@index([performedById])
   @@index([billId])
+  @@index([purchaseOrderId])
 }
 
 /// A saved salon service (haircut, styling, ...) that can be added to a bill. No stock involved.
@@ -208,6 +220,46 @@ model BillItem {
   service Service? @relation(fields: [serviceId], references: [id])
 
   @@index([billId])
+  @@index([productId])
+}
+
+/// Products ordered for the shop. Stays ACTIVE until every line is received or the
+/// owner closes it. Stock only changes on receipt, through STOCK_IN movements linked by purchaseOrderId.
+model PurchaseOrder {
+  id          String      @id @default(cuid())
+  orderNumber String      @unique // ORD-000001
+  status      OrderStatus @default(ACTIVE)
+  notes       String?
+  createdById String
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  closedById  String?
+  closedAt    DateTime?
+  closeReason String?
+
+  items     PurchaseOrderItem[]
+  movements StockMovement[]
+  createdBy User  @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  closedBy  User? @relation("OrderClosedBy", fields: [closedById], references: [id])
+
+  @@index([status, createdAt])
+}
+
+model PurchaseOrderItem {
+  id               String   @id @default(cuid())
+  purchaseOrderId  String
+  productId        String?
+  // Snapshot so the order still reads correctly if the product is renamed or deleted.
+  name             String
+  quantityOrdered  Int
+  quantityReceived Int      @default(0)
+  unitCost         Decimal? @db.Decimal(12, 2)
+  sortOrder        Int      @default(0)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@unique([purchaseOrderId, productId])
   @@index([productId])
 }
 

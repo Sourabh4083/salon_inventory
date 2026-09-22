@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Archive, History } from "lucide-react";
+import { ArrowLeft, Archive, History, Truck } from "lucide-react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getProduct, movementsForViewer, productForViewer } from "@/lib/services/products";
 import { can } from "@/lib/permissions";
 import { computeMargin } from "@/lib/money";
 import { listMovements } from "@/lib/services/inventory";
+import { getPendingOrdersForProduct } from "@/lib/services/orders";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/constants";
 import { StockBadge } from "@/components/app/stock-badge";
@@ -33,10 +34,11 @@ export default async function ProductDetailPage({
   const [{ id }, { page, from }] = await Promise.all([params, searchParams]);
   const showCost = can(user.role, "product.cost.view");
   const showHistory = can(user.role, "stock.history.view");
-  const [settings, found, history] = await Promise.all([
+  const [settings, found, history, onOrder] = await Promise.all([
     getSettings(),
     getProduct(id),
     showHistory ? listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 }) : null,
+    can(user.role, "order.view") ? getPendingOrdersForProduct(id) : [],
   ]);
   if (!found) notFound();
   const product = productForViewer(found, user.role);
@@ -116,6 +118,25 @@ export default async function ProductDetailPage({
                 <p className="text-xs text-muted-foreground">by {product.updatedByName ?? "—"}</p>
               </div>
             </div>
+
+            {onOrder.length ? (
+              <p className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-sm text-sky-900 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-200">
+                <Truck className="size-4 shrink-0" />
+                On order: {onOrder.reduce((n, o) => n + o.pending, 0)} pending
+                <span className="text-sky-800/80 dark:text-sky-200/80">
+                  (
+                  {onOrder.map((o, i) => (
+                    <span key={o.orderId}>
+                      {i > 0 ? ", " : ""}
+                      <Link href={`/orders/${o.orderId}`} className="font-medium underline-offset-2 hover:underline">
+                        {o.orderNumber}
+                      </Link>
+                    </span>
+                  ))}
+                  )
+                </span>
+              </p>
+            ) : null}
 
             <div className="mt-5">
               <ProductDetailActions product={product} role={user.role} />

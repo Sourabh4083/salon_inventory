@@ -21,7 +21,10 @@ export type Permission =
   | "report.view"
   | "product.cost.view"
   | "product.price.edit"
-  | "employee.manage";
+  | "employee.manage"
+  | "order.view"
+  | "order.receive"
+  | "order.manage";
 
 const MANAGER_PERMISSIONS: Permission[] = [
   "dashboard.view",
@@ -30,13 +33,18 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "product.edit",
   "stock.in",
   "stock.sale",
-  "stock.adjust",
   "bill.create",
   "bill.view",
+  // Deliveries arrive while the manager runs the shop, so they can book them in.
+  "order.view",
+  "order.receive",
 ];
 
 const OWNER_PERMISSIONS: Permission[] = [
   ...MANAGER_PERMISSIONS,
+  // Owner-only: an adjustment rewrites the counted quantity in either direction,
+  // so it stays with the person who reviews Stock Activity.
+  "stock.adjust",
   "product.archive",
   "product.delete",
   "user.manage",
@@ -49,6 +57,7 @@ const OWNER_PERMISSIONS: Permission[] = [
   "product.cost.view",
   "product.price.edit",
   "employee.manage",
+  "order.manage",
 ];
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {

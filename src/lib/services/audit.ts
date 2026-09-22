@@ -26,6 +26,10 @@ export type AuditAction =
   | "EMPLOYEE_DOCUMENT_DELETED"
   | "SALARY_PAYMENT_RECORDED"
   | "SALARY_PAYMENT_DELETED"
+  | "ORDER_CREATED"
+  | "ORDER_UPDATED"
+  | "ORDER_RECEIVED"
+  | "ORDER_CLOSED"
   | "LOGIN";
 
 type TxClient = Prisma.TransactionClient | Db;

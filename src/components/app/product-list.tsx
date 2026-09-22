@@ -12,7 +12,7 @@ import { Pagination } from "@/components/app/pagination";
 
 /**
  * Renders products as cards on phones and as a table on wider screens,
- * sharing one set of Sell / Add Stock / Adjust dialogs.
+ * sharing one set of Reduce / Add Stock / Adjust dialogs.
  */
 export function ProductList({
   products,

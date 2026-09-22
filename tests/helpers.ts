@@ -3,13 +3,15 @@ import { hashPassword } from "@/lib/auth/password";
 import type { SessionUser } from "@/lib/auth/session";
 import type { Role } from "@/generated/prisma/enums";
 
-/** Wipes all tables (order matters because of foreign keys) and resets the product number sequence. */
+/** Wipes all tables (order matters because of foreign keys) and resets the number sequences. */
 export async function resetDatabase() {
   await prisma.auditLog.deleteMany();
   await prisma.salaryPayment.deleteMany();
   await prisma.employeeDocument.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.stockMovement.deleteMany();
+  await prisma.purchaseOrderItem.deleteMany();
+  await prisma.purchaseOrder.deleteMany();
   await prisma.billItem.deleteMany();
   await prisma.bill.deleteMany();
   await prisma.service.deleteMany();
@@ -19,6 +21,7 @@ export async function resetDatabase() {
   await prisma.businessSettings.deleteMany();
   await prisma.$executeRawUnsafe(`ALTER SEQUENCE "product_number_seq" RESTART WITH 1`);
   await prisma.$executeRawUnsafe(`ALTER SEQUENCE "bill_number_seq" RESTART WITH 1`);
+  await prisma.$executeRawUnsafe(`ALTER SEQUENCE "order_number_seq" RESTART WITH 1`);
 }
 
 export const OWNER_PASSWORD = "Owner@Test1234";

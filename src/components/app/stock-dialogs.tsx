@@ -2,7 +2,7 @@
 
 import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { ArrowDownToLine, ClipboardCheck, LoaderCircle, ShoppingBag } from "lucide-react";
+import { ArrowDownToLine, ClipboardCheck, LoaderCircle, PackageMinus } from "lucide-react";
 import { adjustStockAction, saleAction, stockInAction } from "@/app/actions/inventory";
 import type { ProductDTO } from "@/lib/services/products";
 import { formatMoney } from "@/lib/format";
@@ -67,9 +67,9 @@ function FooterButtons({ pending, disabled, close, icon, label }: { pending: boo
   );
 }
 
-/* ---------------- SELL / REDUCE STOCK ---------------- */
+/* ---------------- REDUCE STOCK (no bill) ---------------- */
 
-function SellForm({ product, close, onDone }: FormProps) {
+function ReduceStockForm({ product, close, onDone }: FormProps) {
   const id = useId();
   const [qty, setQty] = useState("1");
   const [note, setNote] = useState("");
@@ -88,7 +88,7 @@ function SellForm({ product, close, onDone }: FormProps) {
     start(async () => {
       const res = await saleAction({ productId: product.id, quantity: n, note });
       if (!res.ok) return setError(res.error);
-      toast.success(`Sold ${n} × ${product.name}`, {
+      toast.success(`Reduced ${n} × ${product.name}`, {
         description: `Stock is now ${res.data.product.quantity} · ${STOCK_STATUS_LABEL[res.data.product.stockStatus]}`,
       });
       close();
@@ -101,37 +101,39 @@ function SellForm({ product, close, onDone }: FormProps) {
       <ProductSummary product={product} />
       {product.quantity === 0 ? (
         <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          This product is out of stock. Add stock before recording a sale.
+          This product is out of stock. There is nothing left to reduce.
         </p>
       ) : (
         <>
-          <Field label="Quantity sold" htmlFor={`${id}-qty`} error={error ?? undefined} required>
+          <Field label="Quantity to reduce" htmlFor={`${id}-qty`} error={error ?? undefined} required>
             <QuantityStepper id={`${id}-qty`} value={qty} onChange={(v) => { setQty(v); setError(null); }} min={1} max={product.quantity} autoFocus invalid={tooMany} />
             <p className={`text-xs ${tooMany ? "text-destructive" : "text-muted-foreground"}`}>
-              {tooMany ? unavailableMsg : `${product.quantity} available → ${Math.max(0, remaining)} after sale`}
+              {tooMany ? unavailableMsg : `${product.quantity} in stock → ${Math.max(0, remaining)} after this`}
             </p>
           </Field>
           <Field label="Note (optional)" htmlFor={`${id}-note`}>
-            <Input id={`${id}-note`} className="h-10" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. walk-in client" maxLength={500} />
+            <Input id={`${id}-note`} className="h-10" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. salon use, damaged, expired" maxLength={500} />
           </Field>
         </>
       )}
-      <FooterButtons pending={pending} disabled={product.quantity === 0 || tooMany} close={close} icon={<ShoppingBag />} label="Confirm sale" />
+      <FooterButtons pending={pending} disabled={product.quantity === 0 || tooMany} close={close} icon={<PackageMinus />} label="Reduce stock" />
     </form>
   );
 }
 
-export function SellDialog({ product, open, onOpenChange, onDone }: BaseProps) {
+export function ReduceStockDialog({ product, open, onOpenChange, onDone }: BaseProps) {
   return (
     <Dialog open={open && product !== null} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 font-heading text-xl">
-            <ShoppingBag className="size-5 text-primary" /> Sell / reduce stock
+            <PackageMinus className="size-5 text-primary" /> Reduce stock
           </DialogTitle>
-          <DialogDescription>Record a sale. Stock is reduced immediately and logged in the history.</DialogDescription>
+          <DialogDescription>
+            Take stock out without a bill — salon use, damage or expiry. For a customer purchase, create a bill instead so the sale is counted.
+          </DialogDescription>
         </DialogHeader>
-        {product ? <SellForm key={product.id} product={product} close={() => onOpenChange(false)} onDone={onDone} /> : null}
+        {product ? <ReduceStockForm key={product.id} product={product} close={() => onOpenChange(false)} onDone={onDone} /> : null}
       </DialogContent>
     </Dialog>
   );
@@ -280,7 +282,7 @@ export function useStockDialogs() {
   const close = () => setState(null);
   const dialogs = (
     <>
-      <SellDialog product={state?.kind === "sale" ? state.product : null} open={state?.kind === "sale"} onOpenChange={(o) => !o && close()} />
+      <ReduceStockDialog product={state?.kind === "sale" ? state.product : null} open={state?.kind === "sale"} onOpenChange={(o) => !o && close()} />
       <StockInDialog product={state?.kind === "stockIn" ? state.product : null} open={state?.kind === "stockIn"} onOpenChange={(o) => !o && close()} />
       <AdjustDialog product={state?.kind === "adjust" ? state.product : null} open={state?.kind === "adjust"} onOpenChange={(o) => !o && close()} />
     </>

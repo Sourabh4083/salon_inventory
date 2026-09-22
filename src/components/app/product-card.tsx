@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowDownToLine, ChevronRight, ShoppingBag } from "lucide-react";
+import { ArrowDownToLine, ChevronRight, PackageMinus } from "lucide-react";
 import type { ProductDTO } from "@/lib/services/products";
 import { formatMoney, formatRelative } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/constants";
@@ -53,14 +53,15 @@ export function ProductCard({
       <div className="mt-4 grid grid-cols-2 gap-2">
         <Button
           size="lg"
+          variant="secondary"
           className="h-11"
           onClick={() => onAction("sale", product)}
           disabled={product.quantity === 0 || product.status === "ARCHIVED"}
         >
-          <ShoppingBag /> Sell
+          <PackageMinus />Reduce
         </Button>
-        <Button size="lg" variant="secondary" className="h-11" onClick={() => onAction("stockIn", product)} disabled={product.status === "ARCHIVED"}>
-          <ArrowDownToLine /> Stock
+        <Button size="lg"  className="h-11" onClick={() => onAction("stockIn", product)} disabled={product.status === "ARCHIVED"}>
+          <ArrowDownToLine /> Add stock
         </Button>
       </div>
       <Link

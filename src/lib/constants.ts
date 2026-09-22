@@ -21,6 +21,23 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   BILL_CANCELLED: "Bill cancelled",
 };
 
+/**
+ * A manual reduction from the inventory page and a product sold on a bill both
+ * write MovementType.SALE, but only the billed one earns money. The two are told
+ * apart by `billId`, so the history never calls a shelf write-off a "Sale".
+ */
+export const MANUAL_REDUCTION_LABEL = "Reduce stock";
+
+export function movementLabel(type: MovementType, billId: string | null): string {
+  return type === "SALE" && billId === null ? MANUAL_REDUCTION_LABEL : MOVEMENT_LABEL[type];
+}
+
+/** The activity filter queries by MovementType, so its SALE option covers both. */
+export const MOVEMENT_FILTER_LABEL: Record<MovementType, string> = {
+  ...MOVEMENT_LABEL,
+  SALE: "Sale / reduce stock",
+};
+
 export const SESSION_COOKIE = "salon_session";
 export const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7; // 7 days
 

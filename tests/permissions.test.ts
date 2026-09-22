@@ -3,13 +3,13 @@ import { can, MANAGER_EDITABLE_PRODUCT_FIELDS } from "@/lib/permissions";
 
 describe("role permissions", () => {
   it("owner has every permission", () => {
-    for (const p of ["product.create", "product.edit", "product.archive", "product.delete", "bill.create", "bill.view", "bill.cancel", "service.manage", "report.view", "stock.sale", "stock.in", "stock.adjust", "user.manage", "settings.manage", "category.manage", "stock.history.view", "product.cost.view", "product.price.edit", "employee.manage"] as const) {
+    for (const p of ["product.create", "product.edit", "product.archive", "product.delete", "bill.create", "bill.view", "bill.cancel", "service.manage", "report.view", "stock.sale", "stock.in", "stock.adjust", "user.manage", "settings.manage", "category.manage", "stock.history.view", "product.cost.view", "product.price.edit", "employee.manage", "order.view", "order.receive", "order.manage"] as const) {
       expect(can("OWNER", p)).toBe(true);
     }
   });
 
   it("manager can run daily inventory", () => {
-    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "stock.adjust", "bill.create", "bill.view"] as const) {
+    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "bill.create", "bill.view", "order.view", "order.receive"] as const) {
       expect(can("MANAGER", p)).toBe(true);
     }
   });
@@ -20,8 +20,8 @@ describe("role permissions", () => {
     }
   });
 
-  it("manager cannot see cost prices, edit prices, view stock activity or manage employees", () => {
-    for (const p of ["product.cost.view", "product.price.edit", "stock.history.view", "employee.manage"] as const) {
+  it("manager cannot adjust stock, see cost prices, edit prices, view stock activity or manage employees", () => {
+    for (const p of ["stock.adjust", "product.cost.view", "product.price.edit", "stock.history.view", "employee.manage", "order.manage"] as const) {
       expect(can("MANAGER", p)).toBe(false);
     }
     expect(MANAGER_EDITABLE_PRODUCT_FIELDS.has("costPrice")).toBe(false);

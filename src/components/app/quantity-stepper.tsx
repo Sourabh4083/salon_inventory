@@ -4,7 +4,7 @@ import { Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
- * Large touch-friendly [-] 1 [+] control used in Sell / Add Stock dialogs.
+ * Large touch-friendly [-] 1 [+] control used in Reduce / Add Stock dialogs.
  * Value is kept as a string so the user can clear and retype it.
  */
 export function QuantityStepper({
