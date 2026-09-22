@@ -5,6 +5,7 @@ import type { EmployeeDocumentKind, PaymentMethod } from "@/generated/prisma/enu
 import { AppError } from "@/lib/errors";
 import { recordAudit } from "@/lib/services/audit";
 import { fromPaise, toPaise } from "@/lib/money";
+import { zonedDate, zonedParts } from "@/lib/timezone";
 import { EMPLOYEE_DOC_MAX_BYTES, EMPLOYEE_DOC_MAX_COUNT, EMPLOYEE_DOC_MIME } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 import type { z } from "zod";
@@ -168,7 +169,7 @@ export const getEmployee = cache(async (id: string, actor: SessionUser): Promise
     prisma.salaryPayment.findMany({ where: { employeeId: id }, orderBy: [{ paidOn: "desc" }, { createdAt: "desc" }], include: paymentInclude }),
   ]);
   if (!row) return null;
-  const yearStart = new Date(new Date().getFullYear(), 0, 1);
+  const yearStart = zonedDate(zonedParts(new Date()).year, 1, 1);
   const paidThisYear = payments.reduce((sum, p) => (p.paidOn >= yearStart ? sum + toPaise(p.amount.toString()) : sum), 0);
   return {
     employee: toEmployeeDTO(row),

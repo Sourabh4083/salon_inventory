@@ -6,6 +6,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { recordAudit } from "@/lib/services/audit";
 import { applyChange, lockProduct } from "@/lib/services/inventory";
 import { fromPaise, toPaise } from "@/lib/money";
+import { APP_TIMEZONE, runtimeZone } from "@/lib/timezone";
 import type { BillCreateData } from "@/lib/validation/schemas";
 import { PAGE_SIZE } from "@/lib/constants";
 
@@ -373,8 +374,16 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
       where: { bill: where },
       select: { kind: true, productId: true, name: true, quantity: true, lineTotal: true, unitCost: true },
     }),
-    prisma.$queryRaw<{ day: Date; bills: bigint; amount: Prisma.Decimal | null }[]>`
-      SELECT date_trunc('day', "createdAt") AS day, COUNT(*) AS bills, SUM(total) AS amount
+    // Bucket by the salon's calendar day, not the host's: a bill rung up at 9 PM IST
+    // is 3:30 PM UTC, and grouping on the raw column would file it under the wrong day.
+    // The column is naive, so it is first read back in the zone it was written in.
+    prisma.$queryRaw<{ day: string; bills: bigint; amount: Prisma.Decimal | null }[]>`
+      SELECT to_char(
+               date_trunc('day', "createdAt" AT TIME ZONE ${runtimeZone()}::text AT TIME ZONE ${APP_TIMEZONE}::text),
+               'YYYY-MM-DD'
+             ) AS day,
+             COUNT(*) AS bills,
+             SUM(total) AS amount
       FROM "Bill"
       WHERE status = 'COMPLETED' AND "createdAt" >= ${range.from} AND "createdAt" <= ${range.to}
       GROUP BY 1 ORDER BY 1`,
@@ -431,7 +440,7 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
       return { method, count: r?._count._all ?? 0, amount: fromPaise(toPaise(r?._sum.total?.toString() ?? "0")) };
     }),
     byDay: dayRows.map((d) => ({
-      date: d.day.toISOString().slice(0, 10),
+      date: d.day,
       billCount: Number(d.bills),
       amount: fromPaise(toPaise(d.amount?.toString() ?? "0")),
     })),
