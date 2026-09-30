@@ -8,6 +8,7 @@ import { getProduct, movementsForViewer, productForViewer } from "@/lib/services
 import { can } from "@/lib/permissions";
 import { computeMargin } from "@/lib/money";
 import { listMovements } from "@/lib/services/inventory";
+import { parsePaging } from "@/lib/paging";
 import { getPendingOrdersForProduct } from "@/lib/services/orders";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { UNIT_LABEL } from "@/lib/constants";
@@ -28,16 +29,17 @@ export default async function ProductDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ page?: string; from?: string }>;
+  searchParams: Promise<{ page?: string; size?: string; from?: string }>;
 }) {
   const user = await requireUserPage();
-  const [{ id }, { page, from }] = await Promise.all([params, searchParams]);
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const from = query.from;
   const showCost = can(user.role, "product.cost.view");
   const showHistory = can(user.role, "stock.history.view");
   const [settings, found, history, onOrder] = await Promise.all([
     getSettings(),
     getProduct(id),
-    showHistory ? listMovements({ productId: id, page: Number(page) || 1, pageSize: 20 }) : null,
+    showHistory ? listMovements({ productId: id, ...parsePaging(query, 10) }) : null,
     can(user.role, "order.view") ? getPendingOrdersForProduct(id) : [],
   ]);
   if (!found) notFound();

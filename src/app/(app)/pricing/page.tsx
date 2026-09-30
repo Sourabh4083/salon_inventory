@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { parsePaging } from "@/lib/paging";
 import { Suspense } from "react";
 import { AlertTriangle, Boxes, Tags, TrendingUp } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
@@ -14,7 +15,7 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Prices & Margins" };
 
-type Params = { q?: string; category?: string; sort?: string; page?: string };
+type Params = { q?: string; category?: string; sort?: string; page?: string; size?: string };
 const SORTS = new Set<ProductSort>(["name", "quantity", "price", "updated"]);
 
 export default async function PricingPage({ searchParams }: { searchParams: Promise<Params> }) {
@@ -25,7 +26,7 @@ export default async function PricingPage({ searchParams }: { searchParams: Prom
     getSettings(),
     listCategories(),
     getPricingSummary(),
-    listProducts({ search: params.q, categoryId: params.category || undefined, sort, page: Number(params.page) || 1 }),
+    listProducts({ search: params.q, categoryId: params.category || undefined, sort, ...parsePaging(params) }),
   ]);
   const sym = settings.currencySymbol;
   const profitPositive = toPaise(summary.potentialProfit) >= 0;

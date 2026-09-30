@@ -4,7 +4,7 @@ import type { Permission } from "@/lib/permissions";
 export type NavItem = {
   href: string;
   label: string;
-  icon: "dashboard" | "inventory" | "low" | "out" | "activity" | "users" | "settings" | "scan" | "billing" | "newbill" | "reports" | "pricing" | "employees" | "orders";
+  icon: "dashboard" | "inventory" | "low" | "out" | "activity" | "users" | "settings" | "scan" | "billing" | "newbill" | "reports" | "pricing" | "employees" | "orders" | "expenses";
   permission?: Permission;
   /** Marks the route as active for nested paths too. */
   exact?: boolean;
@@ -21,6 +21,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/billing/new", label: "New Bill", icon: "newbill", permission: "bill.create" },
       { href: "/billing", label: "Bills", icon: "billing", permission: "bill.view", exact: true },
+      { href: "/expenses", label: "Expenses", icon: "expenses", permission: "expense.record" },
       { href: "/reports", label: "Sales Reports", icon: "reports", permission: "report.view" },
     ],
   },
@@ -42,7 +43,7 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Administration",
     items: [
       { href: "/users", label: "Users", icon: "users", permission: "user.manage" },
-      { href: "/employees", label: "Employees", icon: "employees", permission: "employee.manage" },
+      { href: "/employees", label: "Employees", icon: "employees", permission: "employee.view" },
       { href: "/settings", label: "Settings", icon: "settings", permission: "settings.manage" },
     ],
   },

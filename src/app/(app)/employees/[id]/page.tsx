@@ -4,26 +4,34 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Banknote, CalendarDays, FileBadge, Mail, MapPin, Phone } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { getEmployee } from "@/lib/services/employees";
+import { getEmployee, getEmployeeBasic, getEmployeeSalary } from "@/lib/services/employees";
+import { listAdvances } from "@/lib/services/advances";
+import { can } from "@/lib/permissions";
+import { formatMonth, isMonthParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { fromPaise, toPaise } from "@/lib/money";
+import { EmployeeAdvances } from "@/components/app/employee-advances";
 import { EmployeeDetailActions } from "@/components/app/employee-detail-actions";
 import { EmployeeDocuments } from "@/components/app/employee-documents";
 import { SalaryPayments } from "@/components/app/salary-payments";
 import { AadhaarNumber } from "@/components/app/aadhaar-number";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
-  const user = await requirePermissionPage("employee.manage");
+  const user = await requirePermissionPage("employee.view");
   const { id } = await params;
-  const detail = await getEmployee(id, user);
-  return { title: detail?.employee.name ?? "Employee" };
+  const basic = await getEmployeeBasic(id, user);
+  return { title: basic?.name ?? "Employee" };
 }
 
-export default async function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const user = await requirePermissionPage("employee.manage");
-  const { id } = await params;
-  const [settings, detail] = await Promise.all([getSettings(), getEmployee(id, user)]);
+export default async function EmployeeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ month?: string }> }) {
+  const user = await requirePermissionPage("employee.view");
+  const [{ id }, query] = await Promise.all([params, searchParams]);
+  const month = isMonthParam(query.month) ? query.month : toMonthParam();
+  if (!can(user.role, "employee.manage")) return <ManagerEmployeeView id={id} month={month} />;
+
+  const [settings, detail, advances] = await Promise.all([getSettings(), getEmployee(id, user), listAdvances(id, user, month)]);
   if (!detail) notFound();
-  const { employee, documents, payments, paidThisYear, lastPaidOn } = detail;
+  const { employee, documents, payments, paidThisYear, lastPaidOn, advancesThisMonth } = detail;
   const sym = settings.currencySymbol;
 
   const facts: { icon: React.ComponentType<{ className?: string }>; label: string; value: React.ReactNode }[] = [
@@ -86,9 +94,91 @@ export default async function EmployeeDetailPage({ params }: { params: Promise<{
       </section>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <SalaryPayments employee={employee} payments={payments} paidThisYear={paidThisYear} lastPaidOn={lastPaidOn} currencySymbol={sym} />
+        <SalaryPayments employee={employee} payments={payments} paidThisYear={paidThisYear} lastPaidOn={lastPaidOn} advancesThisMonth={advancesThisMonth} currencySymbol={sym} />
+        <EmployeeAdvances employeeId={employee.id} employeeName={employee.name} advances={advances.items} total={advances.total} month={month} isOwner canAdd currencySymbol={sym} />
         <EmployeeDocuments employeeId={employee.id} documents={documents} />
       </div>
+    </div>
+  );
+}
+
+/**
+ * The manager sees who the person is, the month's advances and what is left of the
+ * salary, so they can answer pay questions. Nothing personal and no payment records.
+ */
+async function ManagerEmployeeView({ id, month }: { id: string; month: string }) {
+  const user = await requirePermissionPage("employee.view");
+  const [settings, employee, salary, advances] = await Promise.all([getSettings(), getEmployeeBasic(id, user), getEmployeeSalary(id, user), listAdvances(id, user, month)]);
+  if (!employee) notFound();
+  const sym = settings.currencySymbol;
+  const tiles = [
+    { label: "Monthly salary", value: formatMoney(salary, sym) },
+    { label: `Advances in ${formatMonth(month)}`, value: `− ${formatMoney(advances.total, sym)}` },
+    { label: "To receive", value: formatMoney(salary ? fromPaise(toPaise(salary) - toPaise(advances.total)) : null, sym) },
+  ];
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <Link href="/employees" className="inline-flex min-h-10 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-4" /> All employees
+      </Link>
+
+      <section className="rounded-2xl border bg-card p-5 shadow-xs sm:p-6">
+        <div className="flex min-w-0 items-center gap-4">
+          <span className="flex size-14 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xl font-semibold text-primary">
+            {employee.name.charAt(0).toUpperCase()}
+          </span>
+          <div className="min-w-0">
+            <h1 className="font-heading text-2xl leading-tight sm:text-3xl">{employee.name}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{employee.designation ?? "Staff"}</p>
+          </div>
+        </div>
+        <dl className="mt-6 grid grid-cols-1 gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Phone className="size-4" />
+            </span>
+            <div>
+              <dt className="text-xs text-muted-foreground">Phone</dt>
+              <dd className="mt-0.5 font-medium">{employee.phone ? <a href={`tel:${employee.phone}`} className="hover:text-primary">{employee.phone}</a> : "—"}</dd>
+            </div>
+          </div>
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <CalendarDays className="size-4" />
+            </span>
+            <div>
+              <dt className="text-xs text-muted-foreground">Joined</dt>
+              <dd className="mt-0.5 font-medium">{employee.joinedAt ? formatDate(employee.joinedAt) : "—"}</dd>
+            </div>
+          </div>
+        </dl>
+      </section>
+
+      <section className="space-y-3" aria-labelledby="salary-heading">
+        <h2 id="salary-heading" className="flex items-center gap-2 font-heading text-lg">
+          <Banknote className="size-4.5 text-primary" /> Salary
+        </h2>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+          {tiles.map((t) => (
+            <div key={t.label} className="rounded-2xl border bg-card p-3 shadow-xs sm:p-4">
+              <p className="text-xs text-muted-foreground">{t.label}</p>
+              <p className="mt-1 truncate text-lg font-semibold tabular-nums sm:text-2xl">{t.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <EmployeeAdvances
+        employeeId={employee.id}
+        employeeName={employee.name}
+        advances={advances.items}
+        total={advances.total}
+        month={month}
+        isOwner={false}
+        canAdd={can(user.role, "advance.record")}
+        currencySymbol={sym}
+      />
     </div>
   );
 }

@@ -9,7 +9,9 @@ import { verifySessionToken } from "@/lib/auth/token";
  * The real authorisation (fresh database lookup, disabled accounts) happens in
  * layouts, pages and every server action.
  */
-const OWNER_ONLY_PREFIXES = ["/users", "/settings", "/reports", "/activity", "/pricing", "/employees"];
+// The manager may open /employees (names only, to note advances); adding or editing
+// employees stays owner-only and is re-checked by each page.
+const OWNER_ONLY_PREFIXES = ["/users", "/settings", "/reports", "/activity", "/pricing", "/employees/new"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -59,6 +61,7 @@ export const config = {
     "/reports/:path*",
     "/pricing/:path*",
     "/employees/:path*",
+    "/expenses/:path*",
     "/api/:path*",
   ],
 };

@@ -37,6 +37,7 @@ describe("formatting", () => {
     expect(formatMoney("1000")).toBe("₹1,000");
     expect(formatMoney("13500.00")).toBe("₹13,500");
     expect(formatMoney("1250000")).toBe("₹12,50,000");
+    expect(formatMoney("-30")).toBe("-₹30");
     expect(formatMoney(null)).toBe("—");
   });
 

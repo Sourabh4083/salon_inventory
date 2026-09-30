@@ -64,22 +64,34 @@ describe("route protection", () => {
   });
 
   it("owner can open dashboard, users, settings, reports, activity, pricing and employees", async () => {
-    for (const path of ["/dashboard", "/users", "/settings", "/reports", "/activity", "/pricing", "/employees"]) {
+    for (const path of ["/dashboard", "/users", "/settings", "/reports", "/activity", "/pricing", "/employees", "/expenses"]) {
       const res = await get(path, ownerToken);
       expect(res.status, path).toBe(200);
     }
   });
 
   it("manager can open dashboard and inventory but NOT owner-only pages", async () => {
-    for (const path of ["/dashboard", "/inventory", "/billing/new"]) {
+    for (const path of ["/dashboard", "/inventory", "/billing/new", "/employees", "/expenses"]) {
       const res = await get(path, managerToken);
       expect(res.status, path).toBe(200);
     }
-    for (const path of ["/users", "/settings", "/reports", "/activity", "/pricing", "/employees", "/employees/new"]) {
+    for (const path of ["/users", "/settings", "/reports", "/activity", "/pricing", "/employees/new"]) {
       const res = await get(path, managerToken);
       expect(res.status, path).toBe(307);
       expect(res.headers.get("location")).toContain("/dashboard?denied=1");
     }
+  });
+
+  it("Excel downloads are owner-only", async () => {
+    for (const kind of ["products", "bills", "sales-report", "expenses", "salaries", "stock-activity"]) {
+      const owner = await get(`/api/export/${kind}`, ownerToken);
+      expect(owner.status, kind).toBe(200);
+      expect(owner.headers.get("content-type"), kind).toContain("spreadsheetml");
+      expect(owner.headers.get("content-disposition"), kind).toMatch(/attachment; filename=".+\.xlsx"/);
+      const manager = await get(`/api/export/${kind}`, managerToken);
+      expect(manager.status, kind).toBe(403);
+    }
+    expect((await get("/api/export/nonsense", ownerToken)).status).toBe(404);
   });
 
   it("employee documents are owner-only at the API level", async () => {

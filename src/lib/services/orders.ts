@@ -401,3 +401,47 @@ export async function getPendingOrdersForProduct(productId: string) {
     .map((r) => ({ orderId: r.purchaseOrder.id, orderNumber: r.purchaseOrder.orderNumber, pending: r.quantityOrdered - r.quantityReceived }))
     .filter((r) => r.pending > 0);
 }
+
+/* ---------- Purchase report ---------- */
+
+export type PurchaseReportOrder = { orderId: string; orderNumber: string; lastReceivedAt: string; units: number; amount: string };
+
+export type PurchaseReport = {
+  /** Cost of everything received in the period (units x the order's unit cost). */
+  total: string;
+  units: number;
+  /** Units received on lines with no cost typed, which the total can't include. */
+  uncostedUnits: number;
+  orders: PurchaseReportOrder[];
+};
+
+/**
+ * Owner: money spent on products that arrived in the range, counted on the day they
+ * were received (so a short or closed order only counts what came in).
+ */
+export async function getPurchaseReport(range: { from: Date; to: Date }): Promise<PurchaseReport> {
+  const rows = await prisma.stockMovement.findMany({
+    where: { type: "STOCK_IN", purchaseOrderId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
+    select: { quantityChange: true, unitCost: true, createdAt: true, purchaseOrder: { select: { id: true, orderNumber: true } } },
+  });
+  const byOrder = new Map<string, { orderNumber: string; last: Date; units: number; paise: number }>();
+  let total = 0;
+  let units = 0;
+  let uncostedUnits = 0;
+  for (const r of rows) {
+    const o = r.purchaseOrder!;
+    const paise = r.unitCost ? toPaise(r.unitCost.toString()) * r.quantityChange : 0;
+    if (!r.unitCost) uncostedUnits += r.quantityChange;
+    total += paise;
+    units += r.quantityChange;
+    const cur = byOrder.get(o.id) ?? { orderNumber: o.orderNumber, last: r.createdAt, units: 0, paise: 0 };
+    cur.units += r.quantityChange;
+    cur.paise += paise;
+    if (r.createdAt > cur.last) cur.last = r.createdAt;
+    byOrder.set(o.id, cur);
+  }
+  const orders = [...byOrder.entries()]
+    .map(([orderId, o]) => ({ orderId, orderNumber: o.orderNumber, lastReceivedAt: o.last.toISOString(), units: o.units, amount: fromPaise(o.paise) }))
+    .sort((a, b) => (a.lastReceivedAt < b.lastReceivedAt ? 1 : -1));
+  return { total: fromPaise(total), units, uncostedUnits, orders };
+}

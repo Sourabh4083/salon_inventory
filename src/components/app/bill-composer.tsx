@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, CreditCard, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Trash2, X } from "lucide-react";
+import { Banknote, Clock, CreditCard, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Trash2, X } from "lucide-react";
 import { lookupProductByCodeAction, quickSearchProductsAction } from "@/app/actions/products";
-import { createBillAction } from "@/app/actions/billing";
+import { createBillAction, updateBillAction } from "@/app/actions/billing";
 import type { ProductDTO } from "@/lib/services/products";
 import type { ServiceDTO } from "@/lib/services/billing";
 import type { PaymentMethod } from "@/generated/prisma/enums";
@@ -37,14 +37,40 @@ const PAYMENTS: { value: PaymentMethod; label: string; icon: React.ComponentType
 let keySeq = 0;
 const nextKey = () => `l${++keySeq}`;
 
-export function BillComposer({ services, currencySymbol }: { services: ServiceDTO[]; currencySymbol: string }) {
+/** An existing bill loaded into the composer for the owner to change. */
+export type BillEditInit = {
+  billId: string;
+  billNumber: string;
+  /** "2026-09-27T18:30" in the salon's local time. */
+  billedAt: string;
+  customerName: string;
+  customerPhone: string;
+  discount: string;
+  paymentMethod: PaymentMethod;
+  payLater: boolean;
+  /** Pay later: what was paid at the counter. */
+  paidNow: string;
+  /** Set when money was collected after billing; payments are then managed on the bill page. */
+  collectedLater: string | null;
+  notes: string;
+  lines: Omit<Line, "key">[];
+  /** Units of each product already on the bill; they count as available again while editing. */
+  originalQty: Record<string, number>;
+};
+
+export function BillComposer({ services, currencySymbol, edit }: { services: ServiceDTO[]; currencySymbol: string; edit?: BillEditInit }) {
   const router = useRouter();
-  const [lines, setLines] = useState<Line[]>([]);
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [discount, setDiscount] = useState("");
-  const [payment, setPayment] = useState<PaymentMethod>("CASH");
-  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<Line[]>(() => (edit ? edit.lines.map((l) => ({ ...l, key: nextKey() })) : []));
+  const [customerName, setCustomerName] = useState(edit?.customerName ?? "");
+  const [customerPhone, setCustomerPhone] = useState(edit?.customerPhone ?? "");
+  const [discount, setDiscount] = useState(edit?.discount ?? "");
+  const [payment, setPayment] = useState<PaymentMethod>(edit?.paymentMethod ?? "CASH");
+  const [payLater, setPayLater] = useState(edit?.payLater ?? false);
+  const [paidNow, setPaidNow] = useState(edit?.paidNow ?? "");
+  const paymentsLocked = Boolean(edit?.collectedLater);
+  const [notes, setNotes] = useState(edit?.notes ?? "");
+  const [billedAt, setBilledAt] = useState(edit?.billedAt ?? "");
+  const availableFor = (p: ProductDTO) => p.quantity + (edit?.originalQty[p.id] ?? 0);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -53,19 +79,22 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, l) => sum + toPaise(l.unitPrice) * l.quantity, 0);
     const disc = Math.max(0, toPaise(discount));
-    return { subtotal, discount: disc, total: Math.max(0, subtotal - disc), discountTooBig: disc > subtotal };
-  }, [lines, discount]);
+    const total = Math.max(0, subtotal - disc);
+    const paid = payLater ? Math.max(0, toPaise(paidNow)) : total;
+    return { subtotal, discount: disc, total, discountTooBig: disc > subtotal, due: Math.max(0, total - paid), paidTooMuch: payLater && paid > total };
+  }, [lines, discount, payLater, paidNow]);
 
   const addProduct = (p: ProductDTO) => {
-    if (p.quantity <= 0) {
+    const available = availableFor(p);
+    if (available <= 0) {
       toast.error(`${p.name} is out of stock.`);
       return;
     }
     setLines((prev) => {
       const existing = prev.find((l) => l.kind === "PRODUCT" && l.productId === p.id);
       if (existing) {
-        if (existing.quantity >= p.quantity) {
-          toast.error(`Only ${p.quantity} of ${p.name} in stock.`);
+        if (existing.quantity >= available) {
+          toast.error(`Only ${available} of ${p.name} in stock.`);
           return prev;
         }
         return prev.map((l) => (l === existing ? { ...l, quantity: l.quantity + 1 } : l));
@@ -79,7 +108,7 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
           name: p.name,
           quantity: 1,
           unitPrice: p.sellingPrice ? trimMoney(p.sellingPrice) : "",
-          available: p.quantity,
+          available,
         },
       ];
     });
@@ -115,26 +144,41 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
       }
     }
     if (totals.discountTooBig) return setFormError("Discount cannot be more than the subtotal.");
+    if (!paymentsLocked && totals.paidTooMuch) return setFormError("Paid now cannot be more than the bill total.");
+    if (edit && !billedAt) return setFormError("Enter the bill date and time.");
+    const payload = {
+      items: lines.map((l) =>
+        l.kind === "PRODUCT"
+          ? { kind: "PRODUCT" as const, productId: l.productId!, quantity: l.quantity, unitPrice: l.unitPrice }
+          : { kind: "SERVICE" as const, serviceId: l.serviceId ?? undefined, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice },
+      ),
+      customerName,
+      customerPhone,
+      discount,
+      paymentMethod: payment,
+      payLater,
+      paidNow: payLater ? paidNow : "",
+      notes,
+    };
     start(async () => {
-      const res = await createBillAction({
-        items: lines.map((l) =>
-          l.kind === "PRODUCT"
-            ? { kind: "PRODUCT", productId: l.productId!, quantity: l.quantity, unitPrice: l.unitPrice }
-            : { kind: "SERVICE", serviceId: l.serviceId ?? undefined, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice },
-        ),
-        customerName,
-        customerPhone,
-        discount,
-        paymentMethod: payment,
-        notes,
-      });
+      const res = edit ? await updateBillAction({ ...payload, billId: edit.billId, billedAt }) : await createBillAction(payload);
       if (!res.ok) {
         setErrors(res.fieldErrors ?? {});
         setFormError(res.error);
         toast.error(res.error);
         return;
       }
-      toast.success(`${res.data.billNumber} saved`, { description: `Total ${formatMoney(res.data.total, currencySymbol)}. Stock updated.` });
+      if (edit) {
+        toast.success(`${res.data.billNumber} updated`, { description: `Total ${formatMoney(res.data.total, currencySymbol)}. Stock and reports updated.` });
+        router.push(`/billing/${res.data.id}`);
+        return;
+      }
+      toast.success(`${res.data.billNumber} saved`, {
+        description:
+          Number(res.data.balanceDue) > 0
+            ? `${formatMoney(res.data.balanceDue, currencySymbol)} to collect later. Stock updated.`
+            : `Total ${formatMoney(res.data.total, currencySymbol)}. Stock updated.`,
+      });
       router.push(`/billing/${res.data.id}?new=1`);
     });
   };
@@ -146,7 +190,7 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
         <section className="rounded-2xl border bg-card p-4 shadow-xs sm:p-5">
           <h2 className="font-heading text-lg">Products</h2>
           <p className="mt-0.5 text-sm text-muted-foreground">Scan a barcode or search by name. Enter adds the first match.</p>
-          <ProductSearch onPick={addProduct} currencySymbol={currencySymbol} />
+          <ProductSearch onPick={addProduct} currencySymbol={currencySymbol} availableFor={availableFor} />
         </section>
 
         <section className="rounded-2xl border bg-card p-4 shadow-xs sm:p-5">
@@ -292,32 +336,71 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
         <div className="space-y-4 border-t px-4 py-4 sm:px-5">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Customer name" htmlFor="bill-customer" error={errors.customerName}>
-              <Input id="bill-customer" className="h-11" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="Optional" maxLength={120} />
+              <Input id="bill-customer" className="h-11" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder={payLater ? "Required" : "Optional"} maxLength={120} aria-invalid={Boolean(errors.customerName)} />
             </Field>
             <Field label="Phone" htmlFor="bill-phone" error={errors.customerPhone}>
-              <Input id="bill-phone" className="h-11" inputMode="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="Optional" maxLength={20} aria-invalid={Boolean(errors.customerPhone)} />
+              <Input id="bill-phone" className="h-11" inputMode="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder={payLater ? "Required" : "Optional"} maxLength={20} aria-invalid={Boolean(errors.customerPhone)} />
             </Field>
           </div>
 
-          <Field label="Payment method" htmlFor="bill-payment">
-            <div className="grid grid-cols-3 gap-2" role="radiogroup" id="bill-payment">
-              {PAYMENTS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  role="radio"
-                  aria-checked={payment === p.value}
-                  onClick={() => setPayment(p.value)}
-                  className={cn(
-                    "flex h-11 items-center justify-center gap-2 rounded-xl border text-sm font-medium transition-colors",
-                    payment === p.value ? "border-primary bg-primary/10 text-primary" : "bg-background hover:bg-accent",
-                  )}
-                >
-                  <p.icon className="size-4" /> {p.label}
-                </button>
-              ))}
-            </div>
-          </Field>
+          {edit ? (
+            <Field label="Bill date & time" htmlFor="bill-date" error={errors.billedAt}>
+              <Input id="bill-date" type="datetime-local" className="h-11" value={billedAt} onChange={(e) => setBilledAt(e.target.value)} aria-invalid={Boolean(errors.billedAt)} />
+            </Field>
+          ) : null}
+
+          {paymentsLocked ? (
+            <p className="rounded-xl border bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
+              {formatMoney(edit!.collectedLater, currencySymbol)} was collected after billing. Add or remove payments on the bill page; the balance updates to the new total.
+            </p>
+          ) : (
+            <Field label="Payment" htmlFor="bill-payment">
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" id="bill-payment">
+                {PAYMENTS.map((p) => (
+                  <PaymentOption
+                    key={p.value}
+                    selected={!payLater && payment === p.value}
+                    onClick={() => {
+                      setPayLater(false);
+                      setPayment(p.value);
+                    }}
+                    icon={p.icon}
+                    label={p.label}
+                  />
+                ))}
+                <PaymentOption selected={payLater} onClick={() => setPayLater(true)} icon={Clock} label="Pay later" />
+              </div>
+              {payLater ? (
+                <div className="mt-3 space-y-2 rounded-xl border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-500/30 dark:bg-orange-500/5">
+                  <div className="flex items-center justify-between gap-3">
+                    <label htmlFor="bill-paid-now" className="text-sm font-medium">
+                      Paid now <span className="font-normal text-muted-foreground">(optional)</span>
+                    </label>
+                    <div className="relative w-32">
+                      <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
+                      <Input
+                        id="bill-paid-now"
+                        inputMode="decimal"
+                        value={paidNow}
+                        onChange={(e) => setPaidNow(e.target.value)}
+                        className={cn("h-9 bg-background pl-7 text-right tabular-nums", totals.paidTooMuch && "border-destructive")}
+                        placeholder="0"
+                        aria-invalid={Boolean(errors.paidNow)}
+                      />
+                    </div>
+                  </div>
+                  {toPaise(paidNow) > 0 ? (
+                    <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Paid now by">
+                      {PAYMENTS.map((p) => (
+                        <PaymentOption key={p.value} selected={payment === p.value} onClick={() => setPayment(p.value)} icon={p.icon} label={p.label} small />
+                      ))}
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground">Enter the customer&apos;s name and phone. Collect the rest from the bill page.</p>
+                </div>
+              ) : null}
+            </Field>
+          )}
 
           <div className="space-y-1.5 text-sm">
             <div className="flex items-center justify-between">
@@ -337,6 +420,12 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
               <span className="font-semibold">Total</span>
               <span className="text-2xl font-semibold tabular-nums">{formatMoney(fromPaise(totals.total), currencySymbol)}</span>
             </div>
+            {!paymentsLocked && payLater ? (
+              <div className="flex items-center justify-between font-semibold text-orange-700 dark:text-orange-300">
+                <span>Balance due</span>
+                <span className="tabular-nums">{formatMoney(fromPaise(totals.due), currencySymbol)}</span>
+              </div>
+            ) : null}
           </div>
 
           <Field label="Notes" htmlFor="bill-notes">
@@ -350,7 +439,7 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
           ) : null}
 
           <Button type="button" size="lg" className="h-12 w-full text-base" onClick={submit} disabled={pending || lines.length === 0}>
-            {pending ? <LoaderCircle className="animate-spin" /> : <Receipt />} Complete bill · {formatMoney(fromPaise(totals.total), currencySymbol)}
+            {pending ? <LoaderCircle className="animate-spin" /> : <Receipt />} {edit ? "Save changes" : "Complete bill"} · {formatMoney(fromPaise(totals.total), currencySymbol)}
           </Button>
         </div>
       </section>
@@ -358,7 +447,37 @@ export function BillComposer({ services, currencySymbol }: { services: ServiceDT
   );
 }
 
-function ProductSearch({ onPick, currencySymbol }: { onPick: (p: ProductDTO) => void; currencySymbol: string }) {
+function PaymentOption({
+  selected,
+  onClick,
+  icon: Icon,
+  label,
+  small,
+}: {
+  selected: boolean;
+  onClick: () => void;
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  small?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      onClick={onClick}
+      className={cn(
+        "flex items-center justify-center gap-2 rounded-xl border text-sm font-medium transition-colors",
+        small ? "h-9" : "h-11",
+        selected ? "border-primary bg-primary/10 text-primary" : "bg-background hover:bg-accent",
+      )}
+    >
+      <Icon className="size-4" /> {label}
+    </button>
+  );
+}
+
+function ProductSearch({ onPick, currencySymbol, availableFor }: { onPick: (p: ProductDTO) => void; currencySymbol: string; availableFor: (p: ProductDTO) => number }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductDTO[]>([]);
   const [loading, setLoading] = useState(false);
@@ -435,7 +554,7 @@ function ProductSearch({ onPick, currencySymbol }: { onPick: (p: ProductDTO) => 
               <li key={p.id}>
                 <button
                   type="button"
-                  disabled={p.quantity === 0}
+                  disabled={availableFor(p) === 0}
                   onClick={() => pick(p)}
                   className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
                 >

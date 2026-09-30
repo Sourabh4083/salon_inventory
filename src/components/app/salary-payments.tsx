@@ -1,13 +1,14 @@
 "use client";
 
-import { useId, useState, useTransition } from "react";
+import { useEffect, useId, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { Banknote, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { addSalaryPaymentAction, deleteSalaryPaymentAction } from "@/app/actions/employees";
+import { advanceTotalAction } from "@/app/actions/advances";
 import type { EmployeeDTO, SalaryPaymentDTO } from "@/lib/services/employees";
-import { toDateParam } from "@/lib/dates";
+import { formatMonth, isMonthParam, toDateParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatMoney } from "@/lib/format";
-import { trimMoney } from "@/lib/money";
+import { fromPaise, toPaise, trimMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,17 +26,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
 function monthLabel(period: string | null) {
-  if (!period) return null;
-  const [y, m] = period.split("-").map(Number);
-  return `${MONTHS[m - 1]} ${y}`;
-}
-
-function currentMonth() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return period ? formatMonth(period) : null;
 }
 
 export function SalaryPayments({
@@ -43,12 +35,14 @@ export function SalaryPayments({
   payments,
   paidThisYear,
   lastPaidOn,
+  advancesThisMonth,
   currencySymbol,
 }: {
   employee: EmployeeDTO;
   payments: SalaryPaymentDTO[];
   paidThisYear: string;
   lastPaidOn: string | null;
+  advancesThisMonth: string;
   currencySymbol: string;
 }) {
   const id = useId();
@@ -70,8 +64,11 @@ export function SalaryPayments({
     });
   };
 
+  const toPay = employee.monthlySalary ? fromPaise(toPaise(employee.monthlySalary) - toPaise(advancesThisMonth)) : null;
   const tiles = [
     { label: "Monthly salary", value: formatMoney(employee.monthlySalary, currencySymbol) },
+    { label: "Advances this month", value: `− ${formatMoney(advancesThisMonth, currencySymbol)}` },
+    { label: "To pay this month", value: formatMoney(toPay, currencySymbol) },
     { label: `Paid in ${new Date().getFullYear()}`, value: formatMoney(paidThisYear, currencySymbol) },
     { label: "Last paid", value: lastPaidOn ? formatDate(lastPaidOn) : "—" },
   ];
@@ -87,7 +84,7 @@ export function SalaryPayments({
         </Button>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3">
         {tiles.map((t) => (
           <div key={t.label} className="rounded-2xl border bg-card p-3 shadow-xs sm:p-4">
             <p className="text-xs text-muted-foreground">{t.label}</p>
@@ -107,6 +104,7 @@ export function SalaryPayments({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Paid {formatDate(p.paidOn)} · by {p.createdByName}
+                  {p.advanceDeducted && toPaise(p.advanceDeducted) > 0 ? ` · ${formatMoney(p.advanceDeducted, currencySymbol)} advances deducted` : ""}
                   {p.note ? ` · “${p.note}”` : ""}
                 </p>
               </div>
@@ -155,19 +153,36 @@ function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDT
   const id = useId();
   const [amount, setAmount] = useState(employee.monthlySalary ? trimMoney(employee.monthlySalary) : "");
   const [paidOn, setPaidOn] = useState(toDateParam(new Date()));
-  const [periodMonth, setPeriodMonth] = useState(currentMonth());
+  const [periodMonth, setPeriodMonth] = useState(toMonthParam());
+  // Advances taken in the chosen month; subtracted from the salary to suggest the amount.
+  const [advances, setAdvances] = useState<{ month: string; total: string } | null>(null);
   const [method, setMethod] = useState<"CASH" | "UPI" | "CARD">("CASH");
   const [note, setNote] = useState("");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
+  useEffect(() => {
+    if (!isMonthParam(periodMonth)) return;
+    let stale = false;
+    void advanceTotalAction(employee.id, periodMonth).then((res) => {
+      if (stale || !res.ok) return;
+      setAdvances({ month: periodMonth, total: res.data });
+      if (employee.monthlySalary) setAmount(trimMoney(fromPaise(Math.max(0, toPaise(employee.monthlySalary) - toPaise(res.data)))));
+    });
+    return () => {
+      stale = true;
+    };
+  }, [employee.id, employee.monthlySalary, periodMonth]);
+
+  const deducted = advances && advances.month === periodMonth && toPaise(advances.total) > 0 ? advances.total : null;
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErr({});
     setError(null);
     start(async () => {
-      const res = await addSalaryPaymentAction({ employeeId: employee.id, amount, paidOn, periodMonth, paymentMethod: method, note });
+      const res = await addSalaryPaymentAction({ employeeId: employee.id, amount, paidOn, periodMonth, paymentMethod: method, note, advanceDeducted: deducted ?? undefined });
       if (!res.ok) {
         setFieldErr(res.fieldErrors ?? {});
         setError(res.fieldErrors ? null : res.error);
@@ -197,6 +212,11 @@ function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDT
             <option value="CARD">Card / bank</option>
           </NativeSelect>
         </Field>
+        {deducted ? (
+          <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:col-span-2 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            Salary {formatMoney(employee.monthlySalary, currencySymbol)} − advances {formatMoney(deducted, currencySymbol)} taken in {formatMonth(periodMonth)} = {formatMoney(fromPaise(toPaise(employee.monthlySalary) - toPaise(deducted)), currencySymbol)}
+          </p>
+        ) : null}
         <Field label="Note (optional)" htmlFor={`${id}-note`} error={fieldErr.note} className="sm:col-span-2">
           <Input id={`${id}-note`} className="h-11" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Advance, bonus, deducted 2 days" maxLength={300} />
         </Field>

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { parsePaging } from "@/lib/paging";
 import Link from "next/link";
 import { Suspense } from "react";
 import { Archive, PackagePlus } from "lucide-react";
@@ -9,11 +10,13 @@ import type { StockStatus } from "@/lib/stock-status";
 import { PageHeader } from "@/components/app/page-header";
 import { ProductFilters } from "@/components/app/product-filters";
 import { ProductList } from "@/components/app/product-list";
+import { DownloadExcelButton } from "@/components/app/download-excel-button";
 import { Button } from "@/components/ui/button";
+import { can } from "@/lib/permissions";
 
 export const metadata: Metadata = { title: "All Products" };
 
-type Params = { q?: string; category?: string; status?: string; sort?: string; page?: string; archived?: string };
+type Params = { q?: string; category?: string; status?: string; sort?: string; page?: string; size?: string; archived?: string };
 
 const STATUSES = new Set<StockStatus>(["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"]);
 const SORTS = new Set<ProductSort>(["name", "quantity", "price", "updated"]);
@@ -33,7 +36,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
       categoryId: params.category || undefined,
       stockStatus: showArchived ? undefined : stockStatus,
       sort,
-      page: Number(params.page) || 1,
+      ...parsePaging(params),
       archivedOnly: showArchived,
     }),
   ]);
@@ -49,6 +52,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         }
         actions={
           <>
+            {can(user.role, "data.export") ? <DownloadExcelButton kind="products" /> : null}
             {user.role === "OWNER" ? (
               <Button variant="outline" size="lg" className="h-11" render={<Link href={showArchived ? "/inventory" : "/inventory?archived=1"} />}>
                 <Archive /> {showArchived ? "Active products" : "Archived"}

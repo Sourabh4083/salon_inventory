@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowDownToLine, ClipboardCheck, PackageMinus, PackagePlus, ShoppingBag, Undo2 } from "lucide-react";
+import { ArrowDownToLine, ClipboardCheck, PackageMinus, PackagePlus, PencilLine, ShoppingBag, Undo2 } from "lucide-react";
 import type { MovementDTO } from "@/lib/services/products";
 import type { MovementType } from "@/generated/prisma/enums";
 import { movementLabel } from "@/lib/constants";
@@ -20,6 +20,7 @@ const ICON: Record<IconKey, React.ComponentType<{ className?: string }>> = {
   MANUAL_REDUCTION: PackageMinus,
   ADJUSTMENT: ClipboardCheck,
   BILL_CANCELLED: Undo2,
+  BILL_EDITED: PencilLine,
 };
 
 const TONE: Record<MovementType, string> = {
@@ -28,6 +29,7 @@ const TONE: Record<MovementType, string> = {
   SALE: "bg-rose-50 text-rose-700 dark:bg-rose-500/10 dark:text-rose-300",
   ADJUSTMENT: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300",
   BILL_CANCELLED: "bg-violet-50 text-violet-700 dark:bg-violet-500/10 dark:text-violet-300",
+  BILL_EDITED: "bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300",
 };
 
 export function MovementTypeChip({ type, billId }: { type: MovementType; billId: string | null }) {

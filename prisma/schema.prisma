@@ -25,6 +25,7 @@ enum MovementType {
   SALE
   ADJUSTMENT
   BILL_CANCELLED
+  BILL_EDITED
 }
 
 enum PaymentMethod {
@@ -76,55 +77,59 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  movements       StockMovement[]
-  auditLogs       AuditLog[]
-  createdProducts Product[]       @relation("ProductCreatedBy")
-  updatedProducts Product[]       @relation("ProductUpdatedBy")
-  bills           Bill[]          @relation("BillCreatedBy")
-  cancelledBills  Bill[]          @relation("BillCancelledBy")
+  movements         StockMovement[]
+  auditLogs         AuditLog[]
+  createdProducts   Product[]          @relation("ProductCreatedBy")
+  updatedProducts   Product[]          @relation("ProductUpdatedBy")
+  bills             Bill[]             @relation("BillCreatedBy")
+  cancelledBills    Bill[]             @relation("BillCancelledBy")
   createdEmployees  Employee[]         @relation("EmployeeCreatedBy")
   updatedEmployees  Employee[]         @relation("EmployeeUpdatedBy")
   uploadedDocuments EmployeeDocument[] @relation("EmployeeDocumentUploadedBy")
   salaryPayments    SalaryPayment[]    @relation("SalaryPaymentCreatedBy")
   createdOrders     PurchaseOrder[]    @relation("OrderCreatedBy")
   closedOrders      PurchaseOrder[]    @relation("OrderClosedBy")
+  editedBills       Bill[]             @relation("BillEditedBy")
+  advances          EmployeeAdvance[]  @relation("AdvanceCreatedBy")
+  expenses          Expense[]          @relation("ExpenseCreatedBy")
+  billPayments      BillPayment[]      @relation("BillPaymentCreatedBy")
 
   @@index([role, isActive])
 }
 
 model Category {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+  id        String    @id @default(cuid())
+  name      String    @unique
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
   products  Product[]
 }
 
 model Product {
-  id            String        @id @default(cuid())
-  productNumber String        @unique // PRD-000001
-  name          String
-  sku           String?       @unique
-  barcode       String?       @unique
-  categoryId    String
-  description   String?
-  costPrice     Decimal?      @db.Decimal(12, 2)
-  sellingPrice  Decimal?      @db.Decimal(12, 2)
-  quantity      Int           @default(0)
+  id                String        @id @default(cuid())
+  productNumber     String        @unique // PRD-000001
+  name              String
+  sku               String?       @unique
+  barcode           String?       @unique
+  categoryId        String
+  description       String?
+  costPrice         Decimal?      @db.Decimal(12, 2)
+  sellingPrice      Decimal?      @db.Decimal(12, 2)
+  quantity          Int           @default(0)
   // Per-product override; null means "use the shop-wide threshold from settings".
   lowStockThreshold Int?
-  unit          Unit          @default(PIECE)
-  location      String?
-  notes         String?
-  status        ProductStatus @default(ACTIVE)
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  createdById   String?
-  updatedById   String?
+  unit              Unit          @default(PIECE)
+  location          String?
+  notes             String?
+  status            ProductStatus @default(ACTIVE)
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+  createdById       String?
+  updatedById       String?
 
-  category  Category        @relation(fields: [categoryId], references: [id])
-  createdBy User?           @relation("ProductCreatedBy", fields: [createdById], references: [id])
-  updatedBy User?           @relation("ProductUpdatedBy", fields: [updatedById], references: [id])
+  category   Category            @relation(fields: [categoryId], references: [id])
+  createdBy  User?               @relation("ProductCreatedBy", fields: [createdById], references: [id])
+  updatedBy  User?               @relation("ProductUpdatedBy", fields: [updatedById], references: [id])
   movements  StockMovement[]
   billItems  BillItem[]
   orderItems PurchaseOrderItem[]
@@ -163,57 +168,86 @@ model StockMovement {
 
 /// A saved salon service (haircut, styling, ...) that can be added to a bill. No stock involved.
 model Service {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  price     Decimal  @db.Decimal(12, 2)
-  isActive  Boolean  @default(true)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String     @id @default(cuid())
+  name      String     @unique
+  price     Decimal    @db.Decimal(12, 2)
+  isActive  Boolean    @default(true)
+  sortOrder Int        @default(0)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
   billItems BillItem[]
 }
 
 /// A customer bill. Product lines reduce stock through SALE movements linked by billId.
 model Bill {
-  id             String        @id @default(cuid())
-  billNumber     String        @unique // BILL-000001
-  status         BillStatus    @default(COMPLETED)
-  customerName   String?
-  customerPhone  String?
-  subtotal       Decimal       @db.Decimal(12, 2)
-  discount       Decimal       @default(0) @db.Decimal(12, 2)
-  total          Decimal       @db.Decimal(12, 2)
-  paymentMethod  PaymentMethod @default(CASH)
-  notes          String?
-  createdById    String
-  createdAt      DateTime      @default(now())
-  cancelledById  String?
-  cancelledAt    DateTime?
-  cancelReason   String?
+  id            String         @id @default(cuid())
+  billNumber    String         @unique // BILL-000001
+  status        BillStatus     @default(COMPLETED)
+  customerName  String?
+  customerPhone String?
+  subtotal      Decimal        @db.Decimal(12, 2)
+  discount      Decimal        @default(0) @db.Decimal(12, 2)
+  total         Decimal        @db.Decimal(12, 2)
+  /// How the money taken at the counter was paid; null for a "pay later" bill with nothing paid then.
+  paymentMethod PaymentMethod? @default(CASH)
+  /// What the customer still owes (total minus payments). 0 once fully paid.
+  balanceDue    Decimal        @default(0) @db.Decimal(12, 2)
+  notes         String?
+  createdById   String
+  createdAt     DateTime       @default(now())
+  cancelledById String?
+  cancelledAt   DateTime?
+  cancelReason  String?
+  // Set when the owner changes a bill after it was made. Only the owner is shown this.
+  editedAt      DateTime?
+  editedById    String?
 
   items       BillItem[]
   movements   StockMovement[]
-  createdBy   User  @relation("BillCreatedBy", fields: [createdById], references: [id])
-  cancelledBy User? @relation("BillCancelledBy", fields: [cancelledById], references: [id])
+  payments    BillPayment[]
+  createdBy   User            @relation("BillCreatedBy", fields: [createdById], references: [id])
+  cancelledBy User?           @relation("BillCancelledBy", fields: [cancelledById], references: [id])
+  editedBy    User?           @relation("BillEditedBy", fields: [editedById], references: [id])
 
   @@index([createdAt])
   @@index([status, createdAt])
   @@index([customerPhone])
+  @@index([status, balanceDue])
+}
+
+/// Money received against a bill. A bill paid in full at the counter has one payment
+/// (atBilling); a "pay later" bill collects the rest in one or more later payments.
+model BillPayment {
+  id          String        @id @default(cuid())
+  billId      String
+  amount      Decimal       @db.Decimal(12, 2)
+  method      PaymentMethod
+  paidAt      DateTime      @default(now())
+  /// Taken at the counter when the bill was made; follows the bill's date and method on edit.
+  atBilling   Boolean       @default(false)
+  createdById String
+  createdAt   DateTime      @default(now())
+
+  bill      Bill @relation(fields: [billId], references: [id], onDelete: Cascade)
+  createdBy User @relation("BillPaymentCreatedBy", fields: [createdById], references: [id])
+
+  @@index([billId])
+  @@index([paidAt])
 }
 
 model BillItem {
-  id          String       @id @default(cuid())
-  billId      String
-  kind        BillItemKind
-  productId   String?
-  serviceId   String?
+  id        String       @id @default(cuid())
+  billId    String
+  kind      BillItemKind
+  productId String?
+  serviceId String?
   // Snapshot at time of sale so the bill never changes when catalog prices change.
-  name        String
-  quantity    Int
-  unitPrice   Decimal      @db.Decimal(12, 2)
-  unitCost    Decimal?     @db.Decimal(12, 2)
-  lineTotal   Decimal      @db.Decimal(12, 2)
-  sortOrder   Int          @default(0)
+  name      String
+  quantity  Int
+  unitPrice Decimal      @db.Decimal(12, 2)
+  unitCost  Decimal?     @db.Decimal(12, 2)
+  lineTotal Decimal      @db.Decimal(12, 2)
+  sortOrder Int          @default(0)
 
   bill    Bill     @relation(fields: [billId], references: [id], onDelete: Cascade)
   product Product? @relation(fields: [productId], references: [id])
@@ -239,8 +273,8 @@ model PurchaseOrder {
 
   items     PurchaseOrderItem[]
   movements StockMovement[]
-  createdBy User  @relation("OrderCreatedBy", fields: [createdById], references: [id])
-  closedBy  User? @relation("OrderClosedBy", fields: [closedById], references: [id])
+  createdBy User                @relation("OrderCreatedBy", fields: [createdById], references: [id])
+  closedBy  User?               @relation("OrderClosedBy", fields: [closedById], references: [id])
 
   @@index([status, createdAt])
 }
@@ -312,6 +346,7 @@ model Employee {
   updatedBy User?              @relation("EmployeeUpdatedBy", fields: [updatedById], references: [id])
   documents EmployeeDocument[]
   payments  SalaryPayment[]
+  advances  EmployeeAdvance[]
 
   @@index([isActive, name])
 }
@@ -335,18 +370,55 @@ model EmployeeDocument {
 }
 
 model SalaryPayment {
-  id            String        @id @default(cuid())
-  employeeId    String
-  amount        Decimal       @db.Decimal(12, 2)
-  paidOn        DateTime
-  periodMonth   String? // "2026-09": which month's salary this covers
-  paymentMethod PaymentMethod @default(CASH)
-  note          String?
-  createdById   String
-  createdAt     DateTime      @default(now())
+  id              String        @id @default(cuid())
+  employeeId      String
+  amount          Decimal       @db.Decimal(12, 2)
+  paidOn          DateTime
+  periodMonth     String? // "2026-09": which month's salary this covers
+  // Advances taken that month and subtracted from the salary; `amount` is what was actually paid.
+  advanceDeducted Decimal?      @db.Decimal(12, 2)
+  paymentMethod   PaymentMethod @default(CASH)
+  note            String?
+  createdById     String
+  createdAt       DateTime      @default(now())
 
   employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   createdBy User     @relation("SalaryPaymentCreatedBy", fields: [createdById], references: [id])
 
   @@index([employeeId, paidOn])
+}
+
+/// Money an employee takes from the shop during the month, deducted from their salary.
+model EmployeeAdvance {
+  id          String   @id @default(cuid())
+  employeeId  String
+  amount      Decimal  @db.Decimal(12, 2)
+  takenOn     DateTime
+  note        String?
+  createdById String
+  createdAt   DateTime @default(now())
+
+  employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("AdvanceCreatedBy", fields: [createdById], references: [id])
+
+  @@index([employeeId, takenOn])
+  @@index([takenOn])
+}
+
+// ---------- Shop expenses ----------
+
+/// Day-to-day money spent by the shop (tea, cleaning, electricity, ...).
+model Expense {
+  id            String        @id @default(cuid())
+  spentOn       DateTime
+  amount        Decimal       @db.Decimal(12, 2)
+  description   String
+  paymentMethod PaymentMethod @default(CASH)
+  createdById   String
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  createdBy User @relation("ExpenseCreatedBy", fields: [createdById], references: [id])
+
+  @@index([spentOn])
 }
