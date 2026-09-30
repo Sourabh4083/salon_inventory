@@ -44,6 +44,7 @@ export function BillFilters() {
       </div>
       <NativeSelect className="h-11 sm:w-44" value={params.get("status") ?? ""} onChange={(e) => push((p) => (e.target.value ? p.set("status", e.target.value) : p.delete("status")))} aria-label="Status">
         <option value="">All bills</option>
+        <option value="UNPAID">Unpaid</option>
         <option value="COMPLETED">Completed</option>
         <option value="CANCELLED">Cancelled</option>
       </NativeSelect>

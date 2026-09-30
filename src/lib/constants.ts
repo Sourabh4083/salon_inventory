@@ -19,6 +19,7 @@ export const MOVEMENT_LABEL: Record<MovementType, string> = {
   SALE: "Sale",
   ADJUSTMENT: "Adjustment",
   BILL_CANCELLED: "Bill cancelled",
+  BILL_EDITED: "Bill edited",
 };
 
 /**
@@ -42,6 +43,8 @@ export const SESSION_COOKIE = "salon_session";
 export const SESSION_DURATION_SECONDS = 60 * 60 * 24 * 7; // 7 days
 
 export const PAGE_SIZE = 25;
+/** Choices offered by the "Rows per page" picker under every paginated list. */
+export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 
 /* ---------- Employees ---------- */
 

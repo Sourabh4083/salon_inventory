@@ -24,7 +24,15 @@ export type Permission =
   | "employee.manage"
   | "order.view"
   | "order.receive"
-  | "order.manage";
+  | "order.manage"
+  | "employee.view"
+  | "advance.record"
+  | "expense.record"
+  | "expense.manage"
+  | "bill.edit"
+  | "data.export"
+  | "salary.view"
+  | "bill.collect";
 
 const MANAGER_PERMISSIONS: Permission[] = [
   "dashboard.view",
@@ -35,9 +43,19 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "stock.sale",
   "bill.create",
   "bill.view",
+  // Pay-later customers settle up at the counter, so whoever is there records it.
+  "bill.collect",
   // Deliveries arrive while the manager runs the shop, so they can book them in.
   "order.view",
   "order.receive",
+  // Staff take cash advances during the day; the manager notes them against the
+  // employee (basic details only) and records the shop's small daily expenses.
+  "employee.view",
+  "advance.record",
+  "expense.record",
+  // When staff query their pay, the manager can show the monthly salary, the month's
+  // advances and the balance to receive (not payment records or personal details).
+  "salary.view",
 ];
 
 const OWNER_PERMISSIONS: Permission[] = [
@@ -58,6 +76,9 @@ const OWNER_PERMISSIONS: Permission[] = [
   "product.price.edit",
   "employee.manage",
   "order.manage",
+  "expense.manage",
+  "bill.edit",
+  "data.export",
 ];
 
 const ROLE_PERMISSIONS: Record<Role, ReadonlySet<Permission>> = {

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Contact, FileBadge } from "lucide-react";
-import type { EmployeeDTO, EmployeeStatusFilter } from "@/lib/services/employees";
+import type { EmployeeBasicDTO, EmployeeListItem, EmployeeStatusFilter } from "@/lib/services/employees";
+import { toPaise } from "@/lib/money";
 import { formatDate, formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -15,7 +16,7 @@ function StatusChip({ active }: { active: boolean }) {
   );
 }
 
-export function EmployeeList({ employees, currencySymbol, query, status }: { employees: EmployeeDTO[]; currencySymbol: string; query?: string; status: EmployeeStatusFilter }) {
+export function EmployeeList({ employees, currencySymbol, query, status }: { employees: EmployeeListItem[]; currencySymbol: string; query?: string; status: EmployeeStatusFilter }) {
   if (employees.length === 0) {
     return (
       <EmptyState
@@ -56,7 +57,10 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
               </div>
               <div className="mt-3 flex items-end justify-between text-sm">
                 <span className="text-muted-foreground">{e.joinedAt ? `Joined ${formatDate(e.joinedAt)}` : "Joining date not set"}</span>
-                <span className="font-semibold tabular-nums">{formatMoney(e.monthlySalary, currencySymbol)}<span className="text-xs font-normal text-muted-foreground">/mo</span></span>
+                <span className="text-right">
+                  <span className="block font-semibold tabular-nums">{formatMoney(e.monthlySalary, currencySymbol)}<span className="text-xs font-normal text-muted-foreground">/mo</span></span>
+                  {toPaise(e.advancesThisMonth) > 0 ? <span className="block text-xs text-amber-700 tabular-nums dark:text-amber-300">Took {formatMoney(e.advancesThisMonth, currencySymbol)} this month</span> : null}
+                </span>
               </div>
             </Link>
           </li>
@@ -74,6 +78,7 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
                 <TableHead>Phone</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="text-right">Monthly salary</TableHead>
+                <TableHead className="text-right">Taken this month</TableHead>
                 <TableHead>Documents</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="pr-4 text-right">Actions</TableHead>
@@ -92,6 +97,7 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
                   <TableCell className="text-sm tabular-nums">{e.phone ?? "—"}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{e.joinedAt ? formatDate(e.joinedAt) : "—"}</TableCell>
                   <TableCell className="text-right font-medium tabular-nums">{formatMoney(e.monthlySalary, currencySymbol)}</TableCell>
+                  <TableCell className="text-right tabular-nums">{toPaise(e.advancesThisMonth) > 0 ? formatMoney(e.advancesThisMonth, currencySymbol) : "—"}</TableCell>
                   <TableCell className="text-sm">
                     <span className="inline-flex items-center gap-1">
                       <FileBadge className="size-3.5 text-muted-foreground" /> {e.documentCount}
@@ -112,5 +118,31 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
         </div>
       </div>
     </>
+  );
+}
+
+/** The manager's list: names only, each opening the page where advances are noted. */
+export function EmployeeBasicList({ employees, query }: { employees: EmployeeBasicDTO[]; query?: string }) {
+  if (employees.length === 0) {
+    return <EmptyState icon={Contact} title={query ? `No employees match “${query}”` : "No employees yet"} description={query ? "Check the spelling or clear the search." : "The owner adds employees."} />;
+  }
+  return (
+    <ul className="divide-y rounded-2xl border bg-card shadow-xs">
+      {employees.map((e) => (
+        <li key={e.id}>
+          <Link href={`/employees/${e.id}`} className="flex min-h-16 items-center gap-3 px-4 py-3 transition-colors hover:bg-accent">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 font-semibold text-primary">{e.name.charAt(0).toUpperCase()}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate font-medium">{e.name}</span>
+              <span className="block truncate text-sm text-muted-foreground">
+                {e.designation ?? "Staff"}
+                {e.phone ? ` · ${e.phone}` : ""}
+              </span>
+            </span>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }

@@ -6,7 +6,10 @@ import { AppError } from "@/lib/errors";
 import { recordAudit } from "@/lib/services/audit";
 import { fromPaise, toPaise } from "@/lib/money";
 import { zonedDate, zonedParts } from "@/lib/timezone";
-import { EMPLOYEE_DOC_MAX_BYTES, EMPLOYEE_DOC_MAX_COUNT, EMPLOYEE_DOC_MIME } from "@/lib/constants";
+import { toMonthParam } from "@/lib/dates";
+import { can } from "@/lib/permissions";
+import { advanceTotalsForMonth } from "@/lib/services/advances";
+import { EMPLOYEE_DOC_MAX_BYTES, EMPLOYEE_DOC_MAX_COUNT, EMPLOYEE_DOC_MIME, PAGE_SIZE } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 import type { z } from "zod";
 import type { employeeSchema, salaryPaymentSchema } from "@/lib/validation/schemas";
@@ -53,6 +56,7 @@ export type SalaryPaymentDTO = {
   periodMonth: string | null;
   paymentMethod: PaymentMethod;
   note: string | null;
+  advanceDeducted: string | null;
   createdAt: string;
   createdByName: string;
 };
@@ -63,7 +67,21 @@ export type EmployeeDetail = {
   payments: SalaryPaymentDTO[];
   paidThisYear: string;
   lastPaidOn: string | null;
+  /** Advances taken so far this calendar month. */
+  advancesThisMonth: string;
 };
+
+/** What the manager may see about a colleague: enough to pick them out, nothing personal. */
+export type EmployeeBasicDTO = {
+  id: string;
+  name: string;
+  designation: string | null;
+  phone: string | null;
+  joinedAt: string | null;
+  isActive: boolean;
+};
+
+export type EmployeeListItem = EmployeeDTO & { advancesThisMonth: string };
 
 const employeeInclude = { _count: { select: { documents: true } } } satisfies Prisma.EmployeeInclude;
 type EmployeeRow = Prisma.EmployeeGetPayload<{ include: typeof employeeInclude }>;
@@ -125,6 +143,7 @@ function toPaymentDTO(p: Prisma.SalaryPaymentGetPayload<{ include: typeof paymen
     periodMonth: p.periodMonth,
     paymentMethod: p.paymentMethod,
     note: p.note,
+    advanceDeducted: p.advanceDeducted ? p.advanceDeducted.toString() : null,
     createdAt: p.createdAt.toISOString(),
     createdByName: p.createdBy.name,
   };
@@ -137,12 +156,15 @@ function assertOwner(actor: SessionUser) {
   if (actor.role !== "OWNER") throw new AppError("Only the owner can manage employees.", "FORBIDDEN");
 }
 
+function assertCanView(actor: SessionUser) {
+  if (!can(actor.role, "employee.view")) throw new AppError("You cannot view employees.", "FORBIDDEN");
+}
+
 /* ---------- Queries ---------- */
 
 export type EmployeeStatusFilter = "active" | "inactive" | "all";
 
-export async function listEmployees(params: { q?: string; status?: EmployeeStatusFilter } = {}, actor: SessionUser): Promise<EmployeeDTO[]> {
-  assertOwner(actor);
+function employeeWhere(params: { q?: string; status?: EmployeeStatusFilter }): Prisma.EmployeeWhereInput {
   const q = params.q?.trim() ?? "";
   const where: Prisma.EmployeeWhereInput = {};
   const status = params.status ?? "active";
@@ -156,9 +178,69 @@ export async function listEmployees(params: { q?: string; status?: EmployeeStatu
       { email: { contains: q, mode: "insensitive" } },
     ];
   }
-  const rows = await prisma.employee.findMany({ where, orderBy: [{ isActive: "desc" }, { name: "asc" }], include: employeeInclude });
-  return rows.map(toEmployeeDTO);
+  return where;
 }
+
+export type EmployeePage<T> = { items: T[]; total: number; page: number; pageSize: number; pageCount: number };
+
+export async function listEmployees(
+  params: { q?: string; status?: EmployeeStatusFilter; page?: number; pageSize?: number } = {},
+  actor: SessionUser,
+): Promise<EmployeePage<EmployeeListItem>> {
+  assertOwner(actor);
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? PAGE_SIZE));
+  const where = employeeWhere(params);
+  const [rows, total] = await Promise.all([
+    prisma.employee.findMany({ where, orderBy: [{ isActive: "desc" }, { name: "asc" }], include: employeeInclude, skip: (page - 1) * pageSize, take: pageSize }),
+    prisma.employee.count({ where }),
+  ]);
+  const advances = await advanceTotalsForMonth(rows.map((r) => r.id), toMonthParam(), actor);
+  return {
+    items: rows.map((r) => ({ ...toEmployeeDTO(r), advancesThisMonth: advances.get(r.id) ?? "0.00" })),
+    total,
+    page,
+    pageSize,
+    pageCount: Math.max(1, Math.ceil(total / pageSize)),
+  };
+}
+
+const basicSelect = { id: true, name: true, designation: true, phone: true, joinedAt: true, isActive: true } satisfies Prisma.EmployeeSelect;
+
+function toBasicDTO(e: Prisma.EmployeeGetPayload<{ select: typeof basicSelect }>): EmployeeBasicDTO {
+  return { ...e, joinedAt: e.joinedAt ? e.joinedAt.toISOString() : null };
+}
+
+/** Manager's list: people currently working, with no personal or salary details. */
+export async function listEmployeesBasic(params: { q?: string; page?: number; pageSize?: number } = {}, actor: SessionUser): Promise<EmployeePage<EmployeeBasicDTO>> {
+  assertCanView(actor);
+  const page = Math.max(1, params.page ?? 1);
+  const pageSize = Math.min(100, Math.max(1, params.pageSize ?? PAGE_SIZE));
+  const q = params.q?.trim();
+  const where: Prisma.EmployeeWhereInput = { isActive: true };
+  if (q) where.OR = [{ name: { contains: q, mode: "insensitive" } }, { designation: { contains: q, mode: "insensitive" } }];
+  const [rows, total] = await Promise.all([
+    prisma.employee.findMany({ where, orderBy: { name: "asc" }, select: basicSelect, skip: (page - 1) * pageSize, take: pageSize }),
+    prisma.employee.count({ where }),
+  ]);
+  return { items: rows.map(toBasicDTO), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+}
+
+/** Manager's view of one colleague. Only active employees are visible. */
+export const getEmployeeBasic = cache(async (id: string, actor: SessionUser): Promise<EmployeeBasicDTO | null> => {
+  assertCanView(actor);
+  const row = await prisma.employee.findUnique({ where: { id }, select: basicSelect });
+  if (!row || (!row.isActive && actor.role !== "OWNER")) return null;
+  return toBasicDTO(row);
+});
+
+/** Monthly salary alone, so the manager can answer "how much will I get?". Same visibility as getEmployeeBasic. */
+export const getEmployeeSalary = cache(async (id: string, actor: SessionUser): Promise<string | null> => {
+  if (!can(actor.role, "salary.view")) throw new AppError("You cannot view salaries.", "FORBIDDEN");
+  const row = await prisma.employee.findUnique({ where: { id }, select: { monthlySalary: true, isActive: true } });
+  if (!row || (!row.isActive && actor.role !== "OWNER")) return null;
+  return row.monthlySalary ? row.monthlySalary.toString() : null;
+});
 
 /** Deduplicated per request (generateMetadata and the page both read it). */
 export const getEmployee = cache(async (id: string, actor: SessionUser): Promise<EmployeeDetail | null> => {
@@ -171,12 +253,14 @@ export const getEmployee = cache(async (id: string, actor: SessionUser): Promise
   if (!row) return null;
   const yearStart = zonedDate(zonedParts(new Date()).year, 1, 1);
   const paidThisYear = payments.reduce((sum, p) => (p.paidOn >= yearStart ? sum + toPaise(p.amount.toString()) : sum), 0);
+  const advances = await advanceTotalsForMonth([id], toMonthParam(), actor);
   return {
     employee: toEmployeeDTO(row),
     documents: documents.map(toDocumentDTO),
     payments: payments.map(toPaymentDTO),
     paidThisYear: fromPaise(paidThisYear),
     lastPaidOn: payments[0]?.paidOn.toISOString() ?? null,
+    advancesThisMonth: advances.get(id) ?? "0.00",
   };
 });
 
@@ -356,6 +440,7 @@ export async function addSalaryPayment(input: SalaryPaymentInput, actor: Session
         periodMonth: input.periodMonth,
         paymentMethod: input.paymentMethod,
         note: input.note,
+        advanceDeducted: input.advanceDeducted,
         createdById: actor.id,
       },
       include: paymentInclude,
@@ -364,8 +449,8 @@ export async function addSalaryPayment(input: SalaryPaymentInput, actor: Session
       action: "SALARY_PAYMENT_RECORDED",
       entityType: "Employee",
       entityId: input.employeeId,
-      summary: `Paid salary ${input.amount} to "${employee.name}"${input.periodMonth ? ` for ${input.periodMonth}` : ""} (${input.paymentMethod})`,
-      metadata: { paymentId: payment.id, amount: input.amount, periodMonth: input.periodMonth },
+      summary: `Paid salary ${input.amount} to "${employee.name}"${input.periodMonth ? ` for ${input.periodMonth}` : ""}${input.advanceDeducted ? ` after deducting advances ${input.advanceDeducted}` : ""} (${input.paymentMethod})`,
+      metadata: { paymentId: payment.id, amount: input.amount, periodMonth: input.periodMonth, advanceDeducted: input.advanceDeducted },
       actorId: actor.id,
     });
     return payment;

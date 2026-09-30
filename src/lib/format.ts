@@ -7,7 +7,7 @@ export function formatMoney(value: string | number | null | undefined, symbol = 
   if (value === null || value === undefined || value === "") return "—";
   const n = typeof value === "string" ? Number(value) : value;
   if (!Number.isFinite(n)) return "—";
-  return `${symbol}${inrFormatter.format(n)}`;
+  return n < 0 ? `-${symbol}${inrFormatter.format(-n)}` : `${symbol}${inrFormatter.format(n)}`;
 }
 
 export function formatNumber(n: number) {

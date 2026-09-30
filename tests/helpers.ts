@@ -7,6 +7,8 @@ import type { Role } from "@/generated/prisma/enums";
 export async function resetDatabase() {
   await prisma.auditLog.deleteMany();
   await prisma.salaryPayment.deleteMany();
+  await prisma.employeeAdvance.deleteMany();
+  await prisma.expense.deleteMany();
   await prisma.employeeDocument.deleteMany();
   await prisma.employee.deleteMany();
   await prisma.stockMovement.deleteMany();

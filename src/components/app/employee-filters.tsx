@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/app/native-select";
 
 /** Search + active/inactive filter for the employees list. Updates the URL so results are server-rendered. */
-export function EmployeeFilters() {
+export function EmployeeFilters({ showStatus = true }: { showStatus?: boolean }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -18,6 +18,7 @@ export function EmployeeFilters() {
   const push = (mutate: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(params.toString());
     mutate(next);
+    next.delete("page");
     const qs = next.toString();
     start(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
   };
@@ -41,11 +42,13 @@ export function EmployeeFilters() {
           </button>
         ) : null}
       </div>
-      <NativeSelect className="h-11 sm:w-44" value={params.get("status") ?? "active"} onChange={(e) => push((p) => (e.target.value === "active" ? p.delete("status") : p.set("status", e.target.value)))} aria-label="Status">
-        <option value="active">Working now</option>
-        <option value="inactive">Left / inactive</option>
-        <option value="all">Everyone</option>
-      </NativeSelect>
+      {showStatus ? (
+        <NativeSelect className="h-11 sm:w-44" value={params.get("status") ?? "active"} onChange={(e) => push((p) => (e.target.value === "active" ? p.delete("status") : p.set("status", e.target.value)))} aria-label="Status">
+          <option value="active">Working now</option>
+          <option value="inactive">Left / inactive</option>
+          <option value="all">Everyone</option>
+        </NativeSelect>
+      ) : null}
     </div>
   );
 }

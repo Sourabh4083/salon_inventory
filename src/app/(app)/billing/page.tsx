@@ -1,16 +1,19 @@
 import type { Metadata } from "next";
+import { parsePaging } from "@/lib/paging";
 import Link from "next/link";
-import { Plus, ReceiptText } from "lucide-react";
+import { HandCoins, Plus, ReceiptText } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { listBills } from "@/lib/services/billing";
+import { getOutstanding, listBills } from "@/lib/services/billing";
 import type { BillStatus } from "@/generated/prisma/enums";
 import { resolveRange } from "@/lib/dates";
 import { formatMoney, formatRelative } from "@/lib/format";
 import { PageHeader } from "@/components/app/page-header";
 import { BillFilters } from "@/components/app/bill-filters";
-import { BillStatusBadge, PaymentChip } from "@/components/app/bill-badges";
+import { BillPaymentStatus, BillStatusBadge } from "@/components/app/bill-badges";
 import { Pagination } from "@/components/app/pagination";
+import { DownloadExcelButton } from "@/components/app/download-excel-button";
+import { can } from "@/lib/permissions";
 import { EmptyState } from "@/components/app/empty-state";
 import { Button } from "@/components/ui/button";
 
@@ -18,17 +21,19 @@ export const metadata: Metadata = { title: "Bills" };
 
 const STATUSES = new Set<BillStatus>(["COMPLETED", "CANCELLED"]);
 
-export default async function BillsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; range?: string; page?: string }> }) {
-  await requirePermissionPage("bill.view");
+export default async function BillsPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string; range?: string; page?: string; size?: string }> }) {
+  const user = await requirePermissionPage("bill.view");
   const params = await searchParams;
+  const unpaid = params.status === "UNPAID";
   const status = STATUSES.has(params.status as BillStatus) ? (params.status as BillStatus) : undefined;
   const range = params.range ? resolveRange({ range: params.range }) : null;
-  const [settings, result] = await Promise.all([
+  const [settings, result, outstanding] = await Promise.all([
     getSettings(),
-    listBills({ search: params.q, status, from: range?.from, to: range?.to, page: Number(params.page) || 1, pageSize: 30 }),
+    listBills({ search: params.q, status, unpaid, from: range?.from, to: range?.to, ...parsePaging(params) }),
+    getOutstanding(),
   ]);
   const sym = settings.currencySymbol;
-  const filtered = Boolean(params.q || status || range);
+  const filtered = Boolean(params.q || status || unpaid || range);
 
   return (
     <div className="space-y-5">
@@ -36,12 +41,31 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
         title="Bills"
         description="Every customer bill, newest first."
         actions={
-          <Button size="lg" className="h-11" render={<Link href="/billing/new" />}>
-            <Plus /> New Bill
-          </Button>
+          <>
+            {can(user.role, "data.export") ? <DownloadExcelButton kind="bills" /> : null}
+            <Button size="lg" className="h-11" render={<Link href="/billing/new" />}>
+              <Plus /> New Bill
+            </Button>
+          </>
         }
       />
       <BillFilters />
+
+      {outstanding.count > 0 ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-200">
+          <HandCoins className="size-4.5 shrink-0" />
+          <span className="flex-1">
+            <span className="font-semibold tabular-nums">{formatMoney(outstanding.amount, sym)}</span> still to collect from {outstanding.count}{" "}
+            {outstanding.count === 1 ? "unpaid bill" : "unpaid bills"}
+            {unpaid ? " · oldest first" : ""}.
+          </span>
+          {unpaid ? null : (
+            <Link href="/billing?status=UNPAID" className="font-medium underline underline-offset-2">
+              View unpaid
+            </Link>
+          )}
+        </div>
+      ) : null}
 
       {result.items.length === 0 ? (
         <EmptyState
@@ -73,7 +97,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
                   </div>
                   <div className="text-right">
                     <p className="text-lg font-semibold tabular-nums">{formatMoney(b.total, sym)}</p>
-                    <PaymentChip method={b.paymentMethod} />
+                    <BillPaymentStatus bill={b} currencySymbol={sym} />
                   </div>
                 </Link>
               </li>
@@ -110,7 +134,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
                       <span className="block truncate text-muted-foreground">{b.items.map((i) => (i.quantity > 1 ? `${i.quantity}× ${i.name}` : i.name)).join(", ")}</span>
                     </td>
                     <td className="px-4 py-3">
-                      <PaymentChip method={b.paymentMethod} />
+                      <BillPaymentStatus bill={b} currencySymbol={sym} />
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{b.createdByName}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{formatRelative(b.createdAt)}</td>

@@ -1,7 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct, deleteProduct, getProduct } from "@/lib/services/products";
-import { closeOrder, createOrder, getOrder, getPendingOrdersForProduct, listOrders, orderForViewer, receiveOrder, updateOrder } from "@/lib/services/orders";
+import { closeOrder, createOrder, getOrder, getPendingOrdersForProduct, getPurchaseReport, listOrders, orderForViewer, receiveOrder, updateOrder } from "@/lib/services/orders";
 import { orderCreateSchema, orderReceiveSchema, productCreateSchema } from "@/lib/validation/schemas";
 import { seedBasics } from "./helpers";
 import type { SessionUser } from "@/lib/auth/session";
@@ -188,5 +188,34 @@ describe("reading", () => {
     expect(history.items.some((o) => o.status === "CLOSED")).toBe(true);
     const found = await listOrders({ search: "close me" });
     expect(found.items.map((o) => o.items[0].name)).toEqual(["Close Me"]);
+  });
+});
+
+describe("purchase report", () => {
+  it("adds up what arrived in the period at the order's cost, per order", async () => {
+    const start = new Date();
+    const costed = await product("Spend Costed", { costPrice: "100" });
+    const typed = await product("Spend Typed");
+    const free = await product("Spend No Cost");
+    const o = await createOrder(
+      order([
+        { productId: costed.id, quantity: 5 },
+        { productId: typed.id, quantity: 4, unitCost: "120" },
+        { productId: free.id, quantity: 3 },
+      ]),
+      owner,
+    );
+    await receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 5 }, { itemId: o.items[1].id, quantity: 2 }, { itemId: o.items[2].id, quantity: 3 }]), manager);
+    // What was never received doesn't count once the order is closed.
+    await closeOrder({ orderId: o.id, reason: "Rest not coming" }, owner);
+
+    const report = await getPurchaseReport({ from: start, to: new Date() });
+    expect(report.total).toBe("740.00");
+    expect(report.units).toBe(10);
+    expect(report.uncostedUnits).toBe(3);
+    expect(report.orders).toEqual([expect.objectContaining({ orderId: o.id, orderNumber: o.orderNumber, units: 10, amount: "740.00" })]);
+
+    const before = await getPurchaseReport({ from: new Date(start.getTime() - 60_000), to: new Date(start.getTime() - 1) });
+    expect(before.orders.map((x) => x.orderId)).not.toContain(o.id);
   });
 });

@@ -3,11 +3,12 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Ban, LoaderCircle, Plus, Printer } from "lucide-react";
+import { Ban, LoaderCircle, Pencil, Plus, Printer } from "lucide-react";
 import { cancelBillAction } from "@/app/actions/billing";
 import type { BillDTO } from "@/lib/services/billing";
 import type { Role } from "@/generated/prisma/enums";
 import { can } from "@/lib/permissions";
+import { formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
@@ -22,12 +23,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export function BillDetailActions({ bill, role }: { bill: BillDTO; role: Role }) {
+export function BillDetailActions({ bill, role, currencySymbol }: { bill: BillDTO; role: Role; currencySymbol: string }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const canCancel = can(role, "bill.cancel") && bill.status === "COMPLETED";
+  const canEdit = can(role, "bill.edit") && bill.status === "COMPLETED";
 
   const cancel = () => {
     setError(null);
@@ -51,6 +53,11 @@ export function BillDetailActions({ bill, role }: { bill: BillDTO; role: Role })
         <Button size="lg" variant="outline" className="h-11" render={<Link href="/billing/new" />}>
           <Plus /> New bill
         </Button>
+        {canEdit ? (
+          <Button size="lg" variant="outline" className="h-11" render={<Link href={`/billing/${bill.id}/edit`} />}>
+            <Pencil /> Edit bill
+          </Button>
+        ) : null}
         {canCancel ? (
           <Button size="lg" variant="ghost" className="h-11 text-destructive hover:text-destructive sm:ml-auto" onClick={() => setOpen(true)}>
             <Ban /> Cancel bill
@@ -65,6 +72,9 @@ export function BillDetailActions({ bill, role }: { bill: BillDTO; role: Role })
               <AlertDialogTitle>Cancel {bill.billNumber}?</AlertDialogTitle>
               <AlertDialogDescription>
                 The bill stays on record marked as cancelled, and every product on it goes back into stock. This cannot be undone.
+                {Number(bill.balanceDue) > 0 && Number(bill.amountPaid) > 0
+                  ? ` ${formatMoney(bill.amountPaid, currencySymbol)} was already received on this bill; return it to the customer.`
+                  : ""}
               </AlertDialogDescription>
             </AlertDialogHeader>
             <Field label="Reason" htmlFor="cancel-reason" required error={error ?? undefined}>

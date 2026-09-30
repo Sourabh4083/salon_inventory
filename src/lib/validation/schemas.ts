@@ -165,7 +165,7 @@ export const billItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
-export const billCreateSchema = z.object({
+const billBase = z.object({
   items: z.array(billItemSchema).min(1, "Add at least one item to the bill."),
   customerName: optionalText(120),
   customerPhone: optionalText(20).transform((v, ctx) => {
@@ -176,9 +176,23 @@ export const billCreateSchema = z.object({
     return v;
   }),
   discount: moneyInput.transform((v) => v ?? "0"),
+  /** Method of the money taken at the counter (the whole bill, or "paidNow" on a pay-later bill). */
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** The customer pays the rest later; the bill stays unpaid until the balance is collected. */
+  payLater: z.boolean().default(false),
+  /** Pay later only: what was paid at the counter now (0 = nothing). */
+  paidNow: moneyInput.transform((v) => v ?? "0"),
   notes: optionalText(500),
 });
+
+/** A pay-later bill must say who owes the money. */
+function requireCustomerForPayLater(v: { payLater: boolean; customerName: string | null; customerPhone: string | null }, ctx: z.RefinementCtx) {
+  if (!v.payLater) return;
+  if (!v.customerName) ctx.addIssue({ code: "custom", path: ["customerName"], message: "Enter the customer's name for a pay-later bill." });
+  if (!v.customerPhone) ctx.addIssue({ code: "custom", path: ["customerPhone"], message: "Enter the customer's phone for a pay-later bill." });
+}
+
+export const billCreateSchema = billBase.superRefine(requireCustomerForPayLater);
 export type BillCreateInput = z.input<typeof billCreateSchema>;
 export type BillCreateData = z.output<typeof billCreateSchema>;
 
@@ -342,8 +356,76 @@ export const salaryPaymentSchema = z.object({
     }),
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   note: optionalText(300),
+  /** Advances taken that month and subtracted from this payment. */
+  advanceDeducted: moneyInput,
 });
 export type SalaryPaymentInput = z.input<typeof salaryPaymentSchema>;
 
 export const EMPLOYEE_DOC_KINDS = ["AADHAAR_FRONT", "AADHAAR_BACK", "OTHER"] as const;
 export const employeeDocumentKindSchema = z.enum(EMPLOYEE_DOC_KINDS).default("OTHER");
+
+/** Required money that must be more than zero. */
+const positiveMoney = requiredMoney.transform((v, ctx) => {
+  if (Number(v) <= 0) {
+    ctx.addIssue({ code: "custom", message: "Amount must be more than 0." });
+    return z.NEVER;
+  }
+  return v;
+});
+
+// ---- Employee advances ----
+
+export const advanceSchema = z.object({
+  employeeId: z.string().min(1),
+  amount: positiveMoney,
+  /** Owner only; the manager's entries are always dated today. */
+  takenOn: optionalDateInput,
+  note: optionalText(300),
+});
+export type AdvanceInput = z.input<typeof advanceSchema>;
+export type AdvanceData = z.output<typeof advanceSchema>;
+
+// ---- Shop expenses ----
+
+export const expenseSchema = z.object({
+  amount: positiveMoney,
+  description: trimmed(200).min(1, "Write what the money was spent on."),
+  /** Owner only; the manager's entries are always dated today. */
+  spentOn: optionalDateInput,
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+});
+export type ExpenseInput = z.input<typeof expenseSchema>;
+export type ExpenseData = z.output<typeof expenseSchema>;
+
+// ---- Bill editing (owner) ----
+
+export const billUpdateSchema = billBase
+  .extend({
+  billId: z.string().min(1),
+  /** "2026-09-27T18:30" typed in the salon's local time. */
+  billedAt: z
+    .string()
+    .trim()
+    .transform((v, ctx) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
+      const d = m ? zonedDate(Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])) : null;
+      if (!d || Number.isNaN(d.getTime())) {
+        ctx.addIssue({ code: "custom", message: "Enter the bill date and time." });
+        return z.NEVER;
+      }
+      return d;
+    }),
+  })
+  .superRefine(requireCustomerForPayLater);
+export type BillUpdateInput = z.input<typeof billUpdateSchema>;
+export type BillUpdateData = z.output<typeof billUpdateSchema>;
+
+// ---- Collecting a bill's balance ----
+
+export const billPaymentSchema = z.object({
+  billId: z.string().min(1),
+  amount: positiveMoney,
+  method: z.enum(PAYMENT_METHODS).default("CASH"),
+});
+export type BillPaymentInput = z.input<typeof billPaymentSchema>;
+export type BillPaymentData = z.output<typeof billPaymentSchema>;

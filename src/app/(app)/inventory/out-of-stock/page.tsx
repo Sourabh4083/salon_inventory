@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { parsePaging } from "@/lib/paging";
 import { Suspense } from "react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
@@ -9,13 +10,13 @@ import { ProductList } from "@/components/app/product-list";
 
 export const metadata: Metadata = { title: "Out of Stock" };
 
-export default async function OutOfStockPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string }> }) {
+export default async function OutOfStockPage({ searchParams }: { searchParams: Promise<{ q?: string; page?: string; size?: string }> }) {
   const user = await requireUserPage();
   const params = await searchParams;
   const [settings, categories, result] = await Promise.all([
     getSettings(),
     listCategories(),
-    listProducts({ search: params.q, stockStatus: "OUT_OF_STOCK", sort: "updated", page: Number(params.page) || 1 }),
+    listProducts({ search: params.q, stockStatus: "OUT_OF_STOCK", sort: "updated", ...parsePaging(params) }),
   ]);
   return (
     <div className="space-y-5">

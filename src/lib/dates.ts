@@ -52,3 +52,34 @@ export function resolveRange(params: { range?: string; from?: string; to?: strin
       return { from: today, to: endOfDay(now), key: "today" };
   }
 }
+
+/* ---------- Calendar months ("2026-09") ---------- */
+
+const MONTH_PARAM = /^(\d{4})-(0[1-9]|1[0-2])$/;
+
+/** "2026-09" for the month this instant falls in, in the salon's zone. */
+export function toMonthParam(d: Date = new Date()) {
+  return toDateParamInZone(d).slice(0, 7);
+}
+
+export function isMonthParam(value: string | undefined | null): value is string {
+  return Boolean(value && MONTH_PARAM.test(value));
+}
+
+/** First and last instant of a "YYYY-MM" month in the salon's zone. */
+export function monthRange(month: string): { from: Date; to: Date } {
+  const m = MONTH_PARAM.exec(month);
+  if (!m) throw new Error(`Invalid month "${month}"`);
+  const year = Number(m[1]);
+  const mon = Number(m[2]);
+  const from = zonedDate(year, mon, 1);
+  const to = new Date(zonedDate(year, mon + 1, 1).getTime() - 1);
+  return { from, to };
+}
+
+/** "Sep 2026" */
+export function formatMonth(month: string) {
+  const m = MONTH_PARAM.exec(month);
+  if (!m) return month;
+  return `${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(m[2]) - 1]} ${m[1]}`;
+}

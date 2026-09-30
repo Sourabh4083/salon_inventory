@@ -13,6 +13,7 @@ import {
   LayoutDashboard,
   PackageSearch,
   Truck,
+  Wallet,
   PackageX,
   ScanBarcode,
   Settings,
@@ -37,6 +38,7 @@ const ICONS: Record<NavItem["icon"], React.ComponentType<{ className?: string }>
   pricing: BadgePercent,
   employees: Contact,
   orders: Truck,
+  expenses: Wallet,
 };
 
 export function SidebarNav({ role, onNavigate, className }: { role: Role; onNavigate?: () => void; className?: string }) {

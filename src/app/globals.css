@@ -165,10 +165,13 @@
   }
 }
 
-/* Receipt printing: hide the app shell and print only the receipt at thermal width. */
+/*
+ * Receipt printing: hide the app shell and print only the receipt, centred on the page.
+ * Thermal rolls (narrow paper) get a full-width slip; A4/Letter gets a larger centred bill.
+ */
 @media print {
   @page {
-    margin: 8mm;
+    margin: 5mm;
   }
   body {
     background: #fff !important;
@@ -182,9 +185,29 @@
   }
   .receipt {
     position: absolute;
-    inset: 0 auto auto 0;
-    width: 80mm;
-    max-width: 100%;
+    top: 0;
+    left: 0;
+    right: 0;
+    margin: 0 auto;
+    width: 100%;
+    max-width: 80mm;
     color: #000;
+  }
+  /* Grey text prints faint on thermal paper. */
+  .receipt .text-muted-foreground {
+    color: #333 !important;
+  }
+  .receipt .receipt-rule {
+    border-color: #000 !important;
+  }
+}
+
+@media print and (min-width: 120mm) {
+  @page {
+    margin: 15mm;
+  }
+  .receipt {
+    max-width: 120mm;
+    zoom: 1.3;
   }
 }

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { parsePaging } from "@/lib/paging";
 import Link from "next/link";
 import { Suspense } from "react";
 import { History, Plus, Truck } from "lucide-react";
@@ -16,7 +17,7 @@ import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Orders" };
 
-export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ view?: string; q?: string; page?: string }> }) {
+export default async function OrdersPage({ searchParams }: { searchParams: Promise<{ view?: string; q?: string; page?: string; size?: string }> }) {
   const user = await requirePermissionPage("order.view");
   const params = await searchParams;
   const history = params.view === "history";
@@ -27,7 +28,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     listOrders({
       statuses: history ? ["RECEIVED", "CLOSED"] : ["ACTIVE"],
       search: params.q,
-      page: Number(params.page) || 1,
+      ...parsePaging(params),
       pageSize: history ? 20 : 50,
     }),
   ]);

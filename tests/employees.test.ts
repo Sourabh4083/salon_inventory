@@ -83,11 +83,11 @@ describe("employee records (owner only)", () => {
     expect(e.monthlySalary).toBe("18000");
     expect(e.documentCount).toBe(0);
 
-    const list = await listEmployees({}, owner);
+    const list = (await listEmployees({}, owner)).items;
     expect(list.map((x) => x.name)).toContain("Priya Sharma");
-    expect((await listEmployees({ q: "styl" }, owner)).map((x) => x.id)).toContain(e.id);
-    expect((await listEmployees({ q: "98765" }, owner)).map((x) => x.id)).toContain(e.id);
-    expect((await listEmployees({ q: "nobody" }, owner)).length).toBe(0);
+    expect((await listEmployees({ q: "styl" }, owner)).items.map((x) => x.id)).toContain(e.id);
+    expect((await listEmployees({ q: "98765" }, owner)).items.map((x) => x.id)).toContain(e.id);
+    expect((await listEmployees({ q: "nobody" }, owner)).items.length).toBe(0);
 
     const detail = await getEmployee(e.id, owner);
     expect(detail?.employee.name).toBe("Priya Sharma");
@@ -109,8 +109,8 @@ describe("employee records (owner only)", () => {
     const off = await setEmployeeActive(employeeId, false, owner);
     expect(off.isActive).toBe(false);
     expect(off.leftAt).not.toBeNull();
-    expect((await listEmployees({}, owner)).map((x) => x.id)).not.toContain(employeeId);
-    expect((await listEmployees({ status: "inactive" }, owner)).map((x) => x.id)).toContain(employeeId);
+    expect((await listEmployees({}, owner)).items.map((x) => x.id)).not.toContain(employeeId);
+    expect((await listEmployees({ status: "inactive" }, owner)).items.map((x) => x.id)).toContain(employeeId);
     const on = await setEmployeeActive(employeeId, true, owner);
     expect(on.isActive).toBe(true);
     expect(on.leftAt).toBeNull();
