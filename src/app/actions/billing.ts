@@ -9,12 +9,15 @@ import {
   billPaymentSchema,
   billUpdateSchema,
   fieldErrors,
+  openBillSchema,
   serviceSchema,
   type BillCreateInput,
   type BillPaymentInput,
   type BillUpdateInput,
+  type OpenBillInput,
   type ServiceInput,
 } from "@/lib/validation/schemas";
+import { discardOpenBill, saveOpenBill, type OpenBillDTO } from "@/lib/services/open-bills";
 import {
   addBillPayment,
   cancelBill,
@@ -48,6 +51,34 @@ export async function createBillAction(input: BillCreateInput): Promise<ActionRe
     const bill = await createBill(parsed.data, user);
     revalidateBilling(bill.id);
     return { ok: true, data: bill };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function saveOpenBillAction(input: OpenBillInput): Promise<ActionResult<OpenBillDTO>> {
+  try {
+    const user = await requirePermission("bill.create");
+    const parsed = openBillSchema.safeParse(input);
+    if (!parsed.success) {
+      const first = parsed.error.issues[0];
+      return { ok: false, error: first?.message ?? "Please check the bill details.", fieldErrors: fieldErrors(parsed.error) };
+    }
+    const openBill = await saveOpenBill(parsed.data, user);
+    revalidatePath("/billing");
+    return { ok: true, data: openBill };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function discardOpenBillAction(openBillId: string): Promise<ActionResult> {
+  try {
+    const user = await requirePermission("bill.create");
+    await discardOpenBill(openBillId, user);
+    revalidatePath("/billing");
+    revalidatePath("/settings");
+    return { ok: true, data: undefined };
   } catch (err) {
     return toActionError(err);
   }

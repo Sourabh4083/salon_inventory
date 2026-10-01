@@ -120,6 +120,7 @@ model User {
   enquiries         Enquiry[]          @relation("EnquiryCreatedBy")
   enquiryCalls      EnquiryCall[]      @relation("EnquiryCallBy")
   attendanceMarked  Attendance[]       @relation("AttendanceMarkedBy")
+  openBills         OpenBill[]         @relation("OpenBillCreatedBy")
 
   @@index([role, isActive])
 }
@@ -285,6 +286,30 @@ model BillItem {
   @@index([productId])
 }
 
+/// A customer still in the shop: the manager notes each product and service as the
+/// employee uses it, then completes it into a Bill when the customer pays. No bill
+/// number and no stock change until then.
+model OpenBill {
+  id            String   @id @default(cuid())
+  /// The employee handling the customer; this is how open bills are told apart.
+  employeeId    String
+  customerName  String?
+  customerPhone String?
+  /// As typed in the composer; checked when the bill is completed.
+  discount      String?
+  notes         String?
+  /// The composer's lines: { kind, productId?, serviceId?, name, quantity, unitPrice }.
+  lines         Json
+  createdById   String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  employee  Employee @relation(fields: [employeeId], references: [id])
+  createdBy User     @relation("OpenBillCreatedBy", fields: [createdById], references: [id])
+
+  @@index([createdAt])
+}
+
 /// Products ordered for the shop. Stays ACTIVE until every line is received or the
 /// owner closes it. Stock only changes on receipt, through STOCK_IN movements linked by purchaseOrderId.
 model PurchaseOrder {
@@ -376,6 +401,7 @@ model Employee {
   payments   SalaryPayment[]
   advances   EmployeeAdvance[]
   attendance Attendance[]
+  openBills  OpenBill[]
 
   @@index([isActive, name])
 }

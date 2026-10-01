@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Clock, CreditCard, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Trash2, X } from "lucide-react";
+import { Banknote, Clock, CreditCard, Hourglass, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Trash2, X } from "lucide-react";
 import { lookupProductByCodeAction, quickSearchProductsAction } from "@/app/actions/products";
-import { createBillAction, updateBillAction } from "@/app/actions/billing";
+import { createBillAction, discardOpenBillAction, saveOpenBillAction, updateBillAction } from "@/app/actions/billing";
 import type { ProductDTO } from "@/lib/services/products";
 import type { ServiceDTO } from "@/lib/services/billing";
 import type { PaymentMethod } from "@/generated/prisma/enums";
@@ -15,7 +15,18 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
+import { NativeSelect } from "@/components/app/native-select";
 import { StockBadge } from "@/components/app/stock-badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type Line = {
   key: string;
@@ -58,17 +69,44 @@ export type BillEditInit = {
   originalQty: Record<string, number>;
 };
 
-export function BillComposer({ services, currencySymbol, edit }: { services: ServiceDTO[]; currencySymbol: string; edit?: BillEditInit }) {
+/** A bill kept open for a customer still in the shop, loaded to add more or to complete. */
+export type OpenBillInit = {
+  id: string;
+  employeeId: string;
+  customerName: string;
+  customerPhone: string;
+  discount: string;
+  notes: string;
+  lines: Omit<Line, "key">[];
+};
+
+export function BillComposer({
+  services,
+  currencySymbol,
+  edit,
+  open,
+  employees = [],
+}: {
+  services: ServiceDTO[];
+  currencySymbol: string;
+  edit?: BillEditInit;
+  open?: OpenBillInit;
+  /** For "Handled by" on new and open bills. */
+  employees?: { id: string; name: string }[];
+}) {
   const router = useRouter();
-  const [lines, setLines] = useState<Line[]>(() => (edit ? edit.lines.map((l) => ({ ...l, key: nextKey() })) : []));
-  const [customerName, setCustomerName] = useState(edit?.customerName ?? "");
-  const [customerPhone, setCustomerPhone] = useState(edit?.customerPhone ?? "");
-  const [discount, setDiscount] = useState(edit?.discount ?? "");
+  const init = edit ?? open;
+  const [lines, setLines] = useState<Line[]>(() => (init ? init.lines.map((l) => ({ ...l, key: nextKey() })) : []));
+  const [employeeId, setEmployeeId] = useState(open?.employeeId ?? "");
+  const [discarding, setDiscarding] = useState(false);
+  const [customerName, setCustomerName] = useState(init?.customerName ?? "");
+  const [customerPhone, setCustomerPhone] = useState(init?.customerPhone ?? "");
+  const [discount, setDiscount] = useState(init?.discount ?? "");
   const [payment, setPayment] = useState<PaymentMethod>(edit?.paymentMethod ?? "CASH");
   const [payLater, setPayLater] = useState(edit?.payLater ?? false);
   const [paidNow, setPaidNow] = useState(edit?.paidNow ?? "");
   const paymentsLocked = Boolean(edit?.collectedLater);
-  const [notes, setNotes] = useState(edit?.notes ?? "");
+  const [notes, setNotes] = useState(init?.notes ?? "");
   const [billedAt, setBilledAt] = useState(edit?.billedAt ?? "");
   const availableFor = (p: ProductDTO) => p.quantity + (edit?.originalQty[p.id] ?? 0);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -161,7 +199,7 @@ export function BillComposer({ services, currencySymbol, edit }: { services: Ser
       notes,
     };
     start(async () => {
-      const res = edit ? await updateBillAction({ ...payload, billId: edit.billId, billedAt }) : await createBillAction(payload);
+      const res = edit ? await updateBillAction({ ...payload, billId: edit.billId, billedAt }) : await createBillAction({ ...payload, openBillId: open?.id });
       if (!res.ok) {
         setErrors(res.fieldErrors ?? {});
         setFormError(res.error);
@@ -180,6 +218,54 @@ export function BillComposer({ services, currencySymbol, edit }: { services: Ser
             : `Total ${formatMoney(res.data.total, currencySymbol)}. Stock updated.`,
       });
       router.push(`/billing/${res.data.id}?new=1`);
+    });
+  };
+
+  /** The customer is still in the shop: save what has been used so far and bill later. */
+  const keepOpen = () => {
+    setErrors({});
+    setFormError(null);
+    if (!lines.length) return setFormError("Add at least one product or service.");
+    if (!employeeId) {
+      const message = employees.length ? "Choose the employee handling this customer." : "No employees yet. The owner can add them under Employees.";
+      setErrors({ employeeId: message });
+      return setFormError(message);
+    }
+    start(async () => {
+      const res = await saveOpenBillAction({
+        id: open?.id,
+        employeeId,
+        customerName,
+        customerPhone,
+        discount,
+        notes,
+        items: lines.map((l) =>
+          l.kind === "PRODUCT"
+            ? { kind: "PRODUCT" as const, productId: l.productId!, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice }
+            : { kind: "SERVICE" as const, serviceId: l.serviceId ?? null, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice },
+        ),
+      });
+      if (!res.ok) {
+        setErrors(res.fieldErrors ?? {});
+        setFormError(res.error);
+        toast.error(res.error);
+        return;
+      }
+      toast.success("Bill kept open", { description: `${res.data.employeeName} · ${formatMoney(res.data.total, currencySymbol)} so far.` });
+      router.push("/billing");
+    });
+  };
+
+  const discard = () => {
+    if (!open) return;
+    start(async () => {
+      const res = await discardOpenBillAction(open.id);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success("Open bill discarded");
+      router.push("/billing");
     });
   };
 
@@ -334,6 +420,19 @@ export function BillComposer({ services, currencySymbol, edit }: { services: Ser
         )}
 
         <div className="space-y-4 border-t px-4 py-4 sm:px-5">
+          {edit ? null : (
+            <Field label="Handled by" htmlFor="bill-employee" error={errors.employeeId}>
+              <NativeSelect id="bill-employee" className="h-11" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} aria-invalid={Boolean(errors.employeeId)}>
+                <option value="">Choose employee</option>
+                {employees.map((e) => (
+                  <option key={e.id} value={e.id}>
+                    {e.name}
+                  </option>
+                ))}
+              </NativeSelect>
+            </Field>
+          )}
+
           <div className="grid grid-cols-2 gap-3">
             <Field label="Customer name" htmlFor="bill-customer" error={errors.customerName}>
               <Input id="bill-customer" className="h-11" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder={payLater ? "Required" : "Optional"} maxLength={120} aria-invalid={Boolean(errors.customerName)} />
@@ -441,8 +540,39 @@ export function BillComposer({ services, currencySymbol, edit }: { services: Ser
           <Button type="button" size="lg" className="h-12 w-full text-base" onClick={submit} disabled={pending || lines.length === 0}>
             {pending ? <LoaderCircle className="animate-spin" /> : <Receipt />} {edit ? "Save changes" : "Complete bill"} · {formatMoney(fromPaise(totals.total), currencySymbol)}
           </Button>
+          {edit ? null : (
+            <>
+              <Button type="button" size="lg" variant="outline" className="h-12 w-full text-base" onClick={keepOpen} disabled={pending || lines.length === 0}>
+                <Hourglass /> Keep open
+              </Button>
+              <p className="text-center text-xs text-muted-foreground">Customer still in the shop? Keep the bill open and add products as they are used.</p>
+            </>
+          )}
+          {open ? (
+            <Button type="button" size="lg" variant="ghost" className="h-11 w-full text-destructive hover:text-destructive" onClick={() => setDiscarding(true)} disabled={pending}>
+              <Trash2 /> Discard open bill
+            </Button>
+          ) : null}
         </div>
       </section>
+
+      {open ? (
+        <AlertDialog open={discarding} onOpenChange={setDiscarding}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Discard this open bill?</AlertDialogTitle>
+              <AlertDialogDescription>Everything noted on it is removed and no bill is made. Stock is not changed. This cannot be undone.</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={pending}>Keep it</AlertDialogCancel>
+              <AlertDialogAction onClick={discard} disabled={pending} variant="destructive">
+                {pending ? <LoaderCircle className="animate-spin" /> : null}
+                Discard
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      ) : null}
     </div>
   );
 }

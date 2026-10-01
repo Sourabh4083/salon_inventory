@@ -165,16 +165,18 @@ export const billItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+const optionalPhone = optionalText(20).transform((v, ctx) => {
+  if (v && !/^[0-9+\-\s()]{6,20}$/.test(v)) {
+    ctx.addIssue({ code: "custom", message: "Enter a valid phone number." });
+    return z.NEVER;
+  }
+  return v;
+});
+
 const billBase = z.object({
   items: z.array(billItemSchema).min(1, "Add at least one item to the bill."),
   customerName: optionalText(120),
-  customerPhone: optionalText(20).transform((v, ctx) => {
-    if (v && !/^[0-9+\-\s()]{6,20}$/.test(v)) {
-      ctx.addIssue({ code: "custom", message: "Enter a valid phone number." });
-      return z.NEVER;
-    }
-    return v;
-  }),
+  customerPhone: optionalPhone,
   discount: moneyInput.transform((v) => v ?? "0"),
   /** Method of the money taken at the counter (the whole bill, or "paidNow" on a pay-later bill). */
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
@@ -192,9 +194,47 @@ function requireCustomerForPayLater(v: { payLater: boolean; customerName: string
   if (!v.customerPhone) ctx.addIssue({ code: "custom", path: ["customerPhone"], message: "Enter the customer's phone for a pay-later bill." });
 }
 
-export const billCreateSchema = billBase.superRefine(requireCustomerForPayLater);
+export const billCreateSchema = billBase
+  .extend({
+    /** Set when an open bill is being completed; it is removed together with making the bill. */
+    openBillId: z.string().min(1).optional(),
+  })
+  .superRefine(requireCustomerForPayLater);
 export type BillCreateInput = z.input<typeof billCreateSchema>;
 export type BillCreateData = z.output<typeof billCreateSchema>;
+
+// ---- Open bills (customer still in the shop) ----
+
+/** Lines are kept as typed: a price may still be blank until the bill is completed. */
+const openBillItemSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("PRODUCT"),
+    productId: z.string().min(1),
+    name: trimmed(120),
+    quantity: positiveQuantityInput,
+    unitPrice: trimmed(20),
+  }),
+  z.object({
+    kind: z.literal("SERVICE"),
+    serviceId: z.string().min(1).optional().nullable(),
+    name: trimmed(120).min(1, "Service name is required."),
+    quantity: positiveQuantityInput,
+    unitPrice: trimmed(20),
+  }),
+]);
+
+export const openBillSchema = z.object({
+  /** Given when adding to a bill that is already open. */
+  id: z.string().min(1).optional(),
+  employeeId: z.string().min(1, "Choose the employee handling this customer."),
+  customerName: optionalText(120),
+  customerPhone: optionalPhone,
+  discount: optionalText(20),
+  notes: optionalText(500),
+  items: z.array(openBillItemSchema).min(1, "Add at least one product or service."),
+});
+export type OpenBillInput = z.input<typeof openBillSchema>;
+export type OpenBillData = z.output<typeof openBillSchema>;
 
 export const billCancelSchema = z.object({
   billId: z.string().min(1),
