@@ -9,6 +9,7 @@ import { listMovements } from "@/lib/services/inventory";
 import { listExpenses } from "@/lib/services/expenses";
 import { getPurchaseReport } from "@/lib/services/orders";
 import { listEmployees } from "@/lib/services/employees";
+import { attendanceSummaries } from "@/lib/services/attendance";
 import { isMonthParam, monthRange, resolveRange, toDateParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { MOVEMENT_LABEL, UNIT_LABEL, movementLabel } from "@/lib/constants";
@@ -192,7 +193,7 @@ async function expensesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
 async function salariesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
   const month = isMonthParam(p.month) ? p.month : toMonthParam();
   const range = monthRange(month);
-  const [employees, advances, payments] = await Promise.all([
+  const [employees, advances, payments, attendance] = await Promise.all([
     collect((page) => listEmployees({ status: "all", page, pageSize: 100 }, actor)),
     prisma.employeeAdvance.findMany({
       where: { takenOn: { gte: range.from, lte: range.to } },
@@ -204,7 +205,9 @@ async function salariesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
       orderBy: { paidOn: "asc" },
       include: { employee: { select: { name: true } }, createdBy: { select: { name: true } } },
     }),
+    attendanceSummaries(month, actor),
   ]);
+  const attendanceBy = new Map(attendance.map((a) => [a.employeeId, a]));
   const advanceBy = new Map<string, number>();
   for (const a of advances) advanceBy.set(a.employeeId, (advanceBy.get(a.employeeId) ?? 0) + toPaise(a.amount.toString()));
   const paidBy = new Map<string, number>();
@@ -218,12 +221,23 @@ async function salariesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
         .map((e) => {
           const salary = toPaise(e.monthlySalary);
           const taken = advanceBy.get(e.id) ?? 0;
+          const att = attendanceBy.get(e.id);
+          const cut = toPaise(att?.deduction);
           return {
             Employee: e.name,
             Designation: e.designation,
             "Monthly salary": e.monthlySalary ? Number(e.monthlySalary) : null,
+            Present: att ? att.present : null,
+            Absent: att ? att.absent : null,
+            "Half days": att ? att.halfDay : null,
+            Holidays: att ? att.holiday : null,
+            "Paid leave": att ? att.leavePaid : null,
+            "Unpaid leave": att ? att.leaveUnpaid + att.leavePending : null,
+            "Not marked": att ? att.notMarked : null,
+            "Days cut": att ? att.cutDays : null,
+            "Pay cut for days off": Number(fromPaise(cut)),
             "Advances taken": Number(fromPaise(taken)),
-            "To pay (salary − advances)": e.monthlySalary ? Number(fromPaise(salary - taken)) : null,
+            "To pay (salary − cut − advances)": e.monthlySalary ? Number(fromPaise(salary - cut - taken)) : null,
             "Salary paid": Number(fromPaise(paidBy.get(e.id) ?? 0)),
             Status: e.isActive ? "Working" : "Left",
           };
@@ -239,6 +253,7 @@ async function salariesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
         "Paid on": formatDate(s.paidOn),
         Employee: s.employee.name,
         "For month": s.periodMonth,
+        "Cut for days off": s.absenceDeducted ? Number(s.absenceDeducted) : null,
         "Advances deducted": s.advanceDeducted ? Number(s.advanceDeducted) : null,
         "Amount paid": Number(s.amount),
         Method: s.paymentMethod,

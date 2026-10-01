@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Banknote, LoaderCircle, Plus, Trash2 } from "lucide-react";
 import { addSalaryPaymentAction, deleteSalaryPaymentAction } from "@/app/actions/employees";
 import { advanceTotalAction } from "@/app/actions/advances";
+import { absenceCutAction } from "@/app/actions/attendance";
 import type { EmployeeDTO, SalaryPaymentDTO } from "@/lib/services/employees";
 import { formatMonth, isMonthParam, toDateParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatMoney } from "@/lib/format";
@@ -35,14 +36,21 @@ export function SalaryPayments({
   payments,
   paidThisYear,
   lastPaidOn,
-  advancesThisMonth,
+  month,
+  advances,
+  absence,
   currencySymbol,
 }: {
   employee: EmployeeDTO;
   payments: SalaryPaymentDTO[];
   paidThisYear: string;
   lastPaidOn: string | null;
-  advancesThisMonth: string;
+  /** The month the page is showing ("2026-09"); the tiles and the payment form follow it. */
+  month: string;
+  /** Advances taken in that month. */
+  advances: string;
+  /** That month's attendance pay cut. */
+  absence: { cutDays: number; deduction: string };
   currencySymbol: string;
 }) {
   const id = useId();
@@ -64,11 +72,13 @@ export function SalaryPayments({
     });
   };
 
-  const toPay = employee.monthlySalary ? fromPaise(toPaise(employee.monthlySalary) - toPaise(advancesThisMonth)) : null;
+  const toPay = employee.monthlySalary ? fromPaise(toPaise(employee.monthlySalary) - toPaise(absence.deduction) - toPaise(advances)) : null;
+  const inMonth = month === toMonthParam() ? "this month" : `in ${formatMonth(month)}`;
   const tiles = [
     { label: "Monthly salary", value: formatMoney(employee.monthlySalary, currencySymbol) },
-    { label: "Advances this month", value: `− ${formatMoney(advancesThisMonth, currencySymbol)}` },
-    { label: "To pay this month", value: formatMoney(toPay, currencySymbol) },
+    { label: `Cut for ${absence.cutDays} day${absence.cutDays === 1 ? "" : "s"} off ${inMonth}`, value: `− ${formatMoney(absence.deduction, currencySymbol)}` },
+    { label: `Advances ${inMonth}`, value: `− ${formatMoney(advances, currencySymbol)}` },
+    { label: month === toMonthParam() ? "To pay this month" : `To pay for ${formatMonth(month)}`, value: formatMoney(toPay, currencySymbol) },
     { label: `Paid in ${new Date().getFullYear()}`, value: formatMoney(paidThisYear, currencySymbol) },
     { label: "Last paid", value: lastPaidOn ? formatDate(lastPaidOn) : "—" },
   ];
@@ -104,6 +114,7 @@ export function SalaryPayments({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Paid {formatDate(p.paidOn)} · by {p.createdByName}
+                  {p.absenceDeducted && toPaise(p.absenceDeducted) > 0 ? ` · ${formatMoney(p.absenceDeducted, currencySymbol)} cut for days off` : ""}
                   {p.advanceDeducted && toPaise(p.advanceDeducted) > 0 ? ` · ${formatMoney(p.advanceDeducted, currencySymbol)} advances deducted` : ""}
                   {p.note ? ` · “${p.note}”` : ""}
                 </p>
@@ -125,7 +136,7 @@ export function SalaryPayments({
             <DialogTitle className="font-heading text-xl">Record salary payment</DialogTitle>
             <DialogDescription>{employee.name}</DialogDescription>
           </DialogHeader>
-          {open ? <PaymentForm employee={employee} currencySymbol={currencySymbol} close={() => setOpen(false)} /> : null}
+          {open ? <PaymentForm employee={employee} month={month} currencySymbol={currencySymbol} close={() => setOpen(false)} /> : null}
         </DialogContent>
       </Dialog>
 
@@ -149,13 +160,13 @@ export function SalaryPayments({
   );
 }
 
-function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDTO; currencySymbol: string; close: () => void }) {
+function PaymentForm({ employee, month, currencySymbol, close }: { employee: EmployeeDTO; month: string; currencySymbol: string; close: () => void }) {
   const id = useId();
   const [amount, setAmount] = useState(employee.monthlySalary ? trimMoney(employee.monthlySalary) : "");
   const [paidOn, setPaidOn] = useState(toDateParam(new Date()));
-  const [periodMonth, setPeriodMonth] = useState(toMonthParam());
-  // Advances taken in the chosen month; subtracted from the salary to suggest the amount.
-  const [advances, setAdvances] = useState<{ month: string; total: string } | null>(null);
+  const [periodMonth, setPeriodMonth] = useState(month);
+  // Advances and the attendance pay cut for the chosen month; subtracted from the salary to suggest the amount.
+  const [cuts, setCuts] = useState<{ month: string; advances: string; absence: string; absentDays: number } | null>(null);
   const [method, setMethod] = useState<"CASH" | "UPI" | "CARD">("CASH");
   const [note, setNote] = useState("");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
@@ -165,24 +176,26 @@ function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDT
   useEffect(() => {
     if (!isMonthParam(periodMonth)) return;
     let stale = false;
-    void advanceTotalAction(employee.id, periodMonth).then((res) => {
-      if (stale || !res.ok) return;
-      setAdvances({ month: periodMonth, total: res.data });
-      if (employee.monthlySalary) setAmount(trimMoney(fromPaise(Math.max(0, toPaise(employee.monthlySalary) - toPaise(res.data)))));
+    void Promise.all([advanceTotalAction(employee.id, periodMonth), absenceCutAction(employee.id, periodMonth)]).then(([adv, abs]) => {
+      if (stale || !adv.ok || !abs.ok) return;
+      setCuts({ month: periodMonth, advances: adv.data, absence: abs.data.deduction, absentDays: abs.data.cutDays });
+      if (employee.monthlySalary) setAmount(trimMoney(fromPaise(Math.max(0, toPaise(employee.monthlySalary) - toPaise(adv.data) - toPaise(abs.data.deduction)))));
     });
     return () => {
       stale = true;
     };
   }, [employee.id, employee.monthlySalary, periodMonth]);
 
-  const deducted = advances && advances.month === periodMonth && toPaise(advances.total) > 0 ? advances.total : null;
+  const current = cuts && cuts.month === periodMonth ? cuts : null;
+  const deducted = current && toPaise(current.advances) > 0 ? current.advances : null;
+  const absence = current && toPaise(current.absence) > 0 ? current.absence : null;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     setFieldErr({});
     setError(null);
     start(async () => {
-      const res = await addSalaryPaymentAction({ employeeId: employee.id, amount, paidOn, periodMonth, paymentMethod: method, note, advanceDeducted: deducted ?? undefined });
+      const res = await addSalaryPaymentAction({ employeeId: employee.id, amount, paidOn, periodMonth, paymentMethod: method, note, advanceDeducted: deducted ?? undefined, absenceDeducted: absence ?? undefined });
       if (!res.ok) {
         setFieldErr(res.fieldErrors ?? {});
         setError(res.fieldErrors ? null : res.error);
@@ -212,9 +225,12 @@ function PaymentForm({ employee, currencySymbol, close }: { employee: EmployeeDT
             <option value="CARD">Card / bank</option>
           </NativeSelect>
         </Field>
-        {deducted ? (
+        {deducted || absence ? (
           <p className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 sm:col-span-2 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-            Salary {formatMoney(employee.monthlySalary, currencySymbol)} − advances {formatMoney(deducted, currencySymbol)} taken in {formatMonth(periodMonth)} = {formatMoney(fromPaise(toPaise(employee.monthlySalary) - toPaise(deducted)), currencySymbol)}
+            Salary {formatMoney(employee.monthlySalary, currencySymbol)}
+            {absence ? ` − ${formatMoney(absence, currencySymbol)} for ${current!.absentDays} day${current!.absentDays === 1 ? "" : "s"} off` : ""}
+            {deducted ? ` − advances ${formatMoney(deducted, currencySymbol)}` : ""} in {formatMonth(periodMonth)} ={" "}
+            {formatMoney(fromPaise(toPaise(employee.monthlySalary) - toPaise(absence) - toPaise(deducted)), currencySymbol)}
           </p>
         ) : null}
         <Field label="Note (optional)" htmlFor={`${id}-note`} error={fieldErr.note} className="sm:col-span-2">

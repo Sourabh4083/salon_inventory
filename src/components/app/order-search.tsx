@@ -6,7 +6,7 @@ import { LoaderCircle, Search, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 
 /** Search box for the orders list. Updates the URL so results are server-rendered. */
-export function OrderSearch() {
+export function OrderSearch({ placeholder = "Search order number, product or note..." }: { placeholder?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
@@ -30,7 +30,7 @@ export function OrderSearch() {
   return (
     <div className="relative">
       <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
-      <Input value={query} onChange={(e) => onQuery(e.target.value)} placeholder="Search order number, product or note..." className="h-11 pr-9 pl-9" autoComplete="off" />
+      <Input value={query} onChange={(e) => onQuery(e.target.value)} placeholder={placeholder} className="h-11 pr-9 pl-9" autoComplete="off" />
       {pending ? (
         <LoaderCircle className="absolute top-1/2 right-3 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
       ) : query ? (

@@ -9,6 +9,7 @@ import { zonedDate, zonedParts } from "@/lib/timezone";
 import { toMonthParam } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { advanceTotalsForMonth } from "@/lib/services/advances";
+import { attendanceSummaries } from "@/lib/services/attendance";
 import { EMPLOYEE_DOC_MAX_BYTES, EMPLOYEE_DOC_MAX_COUNT, EMPLOYEE_DOC_MIME, PAGE_SIZE } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 import type { z } from "zod";
@@ -57,6 +58,7 @@ export type SalaryPaymentDTO = {
   paymentMethod: PaymentMethod;
   note: string | null;
   advanceDeducted: string | null;
+  absenceDeducted: string | null;
   createdAt: string;
   createdByName: string;
 };
@@ -81,7 +83,12 @@ export type EmployeeBasicDTO = {
   isActive: boolean;
 };
 
-export type EmployeeListItem = EmployeeDTO & { advancesThisMonth: string };
+export type EmployeeListItem = EmployeeDTO & {
+  advancesThisMonth: string;
+  /** This month's attendance pay cut so far (absent days, unpaid leave, half days). */
+  cutDaysThisMonth: number;
+  absenceCutThisMonth: string;
+};
 
 const employeeInclude = { _count: { select: { documents: true } } } satisfies Prisma.EmployeeInclude;
 type EmployeeRow = Prisma.EmployeeGetPayload<{ include: typeof employeeInclude }>;
@@ -144,6 +151,7 @@ function toPaymentDTO(p: Prisma.SalaryPaymentGetPayload<{ include: typeof paymen
     paymentMethod: p.paymentMethod,
     note: p.note,
     advanceDeducted: p.advanceDeducted ? p.advanceDeducted.toString() : null,
+    absenceDeducted: p.absenceDeducted ? p.absenceDeducted.toString() : null,
     createdAt: p.createdAt.toISOString(),
     createdByName: p.createdBy.name,
   };
@@ -195,9 +203,15 @@ export async function listEmployees(
     prisma.employee.findMany({ where, orderBy: [{ isActive: "desc" }, { name: "asc" }], include: employeeInclude, skip: (page - 1) * pageSize, take: pageSize }),
     prisma.employee.count({ where }),
   ]);
-  const advances = await advanceTotalsForMonth(rows.map((r) => r.id), toMonthParam(), actor);
+  const [advances, attendance] = await Promise.all([advanceTotalsForMonth(rows.map((r) => r.id), toMonthParam(), actor), attendanceSummaries(toMonthParam(), actor)]);
+  const cuts = new Map(attendance.map((a) => [a.employeeId, a]));
   return {
-    items: rows.map((r) => ({ ...toEmployeeDTO(r), advancesThisMonth: advances.get(r.id) ?? "0.00" })),
+    items: rows.map((r) => ({
+      ...toEmployeeDTO(r),
+      advancesThisMonth: advances.get(r.id) ?? "0.00",
+      cutDaysThisMonth: cuts.get(r.id)?.cutDays ?? 0,
+      absenceCutThisMonth: cuts.get(r.id)?.deduction ?? "0.00",
+    })),
     total,
     page,
     pageSize,
@@ -441,6 +455,7 @@ export async function addSalaryPayment(input: SalaryPaymentInput, actor: Session
         paymentMethod: input.paymentMethod,
         note: input.note,
         advanceDeducted: input.advanceDeducted,
+        absenceDeducted: input.absenceDeducted,
         createdById: actor.id,
       },
       include: paymentInclude,
@@ -449,8 +464,8 @@ export async function addSalaryPayment(input: SalaryPaymentInput, actor: Session
       action: "SALARY_PAYMENT_RECORDED",
       entityType: "Employee",
       entityId: input.employeeId,
-      summary: `Paid salary ${input.amount} to "${employee.name}"${input.periodMonth ? ` for ${input.periodMonth}` : ""}${input.advanceDeducted ? ` after deducting advances ${input.advanceDeducted}` : ""} (${input.paymentMethod})`,
-      metadata: { paymentId: payment.id, amount: input.amount, periodMonth: input.periodMonth, advanceDeducted: input.advanceDeducted },
+      summary: `Paid salary ${input.amount} to "${employee.name}"${input.periodMonth ? ` for ${input.periodMonth}` : ""}${input.advanceDeducted ? ` after deducting advances ${input.advanceDeducted}` : ""}${input.absenceDeducted ? ` and ${input.absenceDeducted} for absent days` : ""} (${input.paymentMethod})`,
+      metadata: { paymentId: payment.id, amount: input.amount, periodMonth: input.periodMonth, advanceDeducted: input.advanceDeducted, absenceDeducted: input.absenceDeducted },
       actorId: actor.id,
     });
     return payment;

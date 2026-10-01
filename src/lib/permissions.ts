@@ -32,7 +32,9 @@ export type Permission =
   | "bill.edit"
   | "data.export"
   | "salary.view"
-  | "bill.collect";
+  | "bill.collect"
+  | "enquiry.manage"
+  | "attendance.mark";
 
 const MANAGER_PERMISSIONS: Permission[] = [
   "dashboard.view",
@@ -53,6 +55,12 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "employee.view",
   "advance.record",
   "expense.record",
+  // New-customer leads (JustDial/WhatsApp numbers, callers): the manager calls them
+  // and notes what they said.
+  "enquiry.manage",
+  // The manager is in the shop every day, so they mark who came. Deciding whether a
+  // leave is paid stays with the owner (employee.manage).
+  "attendance.mark",
   // When staff query their pay, the manager can show the monthly salary, the month's
   // advances and the balance to receive (not payment records or personal details).
   "salary.view",

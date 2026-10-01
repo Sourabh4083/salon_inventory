@@ -358,6 +358,8 @@ export const salaryPaymentSchema = z.object({
   note: optionalText(300),
   /** Advances taken that month and subtracted from this payment. */
   advanceDeducted: moneyInput,
+  /** Pay cut for absent days / unpaid leave that month, subtracted from this payment. */
+  absenceDeducted: moneyInput,
 });
 export type SalaryPaymentInput = z.input<typeof salaryPaymentSchema>;
 
@@ -429,3 +431,93 @@ export const billPaymentSchema = z.object({
 });
 export type BillPaymentInput = z.input<typeof billPaymentSchema>;
 export type BillPaymentData = z.output<typeof billPaymentSchema>;
+
+// ---- Calls (new-customer enquiries) ----
+
+const isPhoneDigits = (digits: string) => /^\d{10,15}$/.test(digits);
+
+/**
+ * Pulls phone numbers out of pasted text: one per line, or separated by commas.
+ * Within a line, space-separated chunks are joined until they make a number, so
+ * "+91 98765 43210" stays one number and "9876543210 9876543211" becomes two.
+ */
+export function splitPhoneNumbers(text: string): { numbers: string[]; invalid: string[] } {
+  const numbers: string[] = [];
+  const invalid: string[] = [];
+  for (const piece of text.split(/[\n,;]+/)) {
+    let current: string[] = [];
+    let digits = "";
+    for (const token of piece.trim().split(/\s+/)) {
+      const d = token.replace(/\D/g, "");
+      if (!d) continue; // words such as "Name:" around a pasted number
+      current.push(token);
+      digits += d;
+      if (digits.length >= 10) {
+        (isPhoneDigits(digits) ? numbers : invalid).push(current.join(" "));
+        current = [];
+        digits = "";
+      }
+    }
+    if (current.length) invalid.push(current.join(" "));
+  }
+  return { numbers, invalid };
+}
+
+export const addNumbersSchema = z
+  .object({ numbers: z.string().max(5000, "That is too much text at once.") })
+  .transform((v, ctx) => {
+    const out = splitPhoneNumbers(v.numbers);
+    if (!out.numbers.length && !out.invalid.length) {
+      ctx.addIssue({ code: "custom", path: ["numbers"], message: "Enter at least one mobile number." });
+      return z.NEVER;
+    }
+    return out;
+  });
+export type AddNumbersInput = z.input<typeof addNumbersSchema>;
+export type AddNumbersData = z.output<typeof addNumbersSchema>;
+
+const singlePhone = z
+  .string()
+  .trim()
+  .min(1, "Enter the mobile number.")
+  .max(25)
+  .refine((v) => /^[0-9+\-\s()]+$/.test(v) && isPhoneDigits(v.replace(/\D/g, "")), "Enter a phone number with 10 to 15 digits.");
+
+export const enquiryEditSchema = z.object({
+  name: optionalText(120),
+  phone: singlePhone,
+  interest: optionalText(200),
+});
+export type EnquiryEditInput = z.input<typeof enquiryEditSchema>;
+export type EnquiryEditData = z.output<typeof enquiryEditSchema>;
+
+export const CALL_RESULTS = ["COMING", "CALL_BACK", "NO_ANSWER", "NOT_INTERESTED"] as const;
+
+export const callLogSchema = z
+  .object({
+    enquiryId: z.string().min(1),
+    result: z.enum(CALL_RESULTS, { message: "Pick what the customer said." }),
+    /** The day they will come (COMING) or when to call again (CALL_BACK). */
+    date: optionalDateInput,
+    note: optionalText(300),
+    name: optionalText(120),
+    interest: optionalText(200),
+  })
+  .superRefine((v, ctx) => {
+    if (v.result === "COMING" && !v.date) ctx.addIssue({ code: "custom", path: ["date"], message: "Pick the day they will come." });
+    if (v.result === "CALL_BACK" && !v.date) ctx.addIssue({ code: "custom", path: ["date"], message: "Pick when to call again." });
+  });
+export type CallLogInput = z.input<typeof callLogSchema>;
+export type CallLogData = z.output<typeof callLogSchema>;
+
+// ---- Attendance ----
+
+export const ATTENDANCE_STATUSES = ["PRESENT", "ABSENT", "HALF_DAY", "HOLIDAY", "LEAVE"] as const;
+
+export const attendanceMarkSchema = z.object({
+  employeeId: z.string().min(1),
+  date: requiredDateInput,
+  status: z.enum(ATTENDANCE_STATUSES),
+});
+export type AttendanceMarkInput = z.input<typeof attendanceMarkSchema>;
+export type AttendanceMarkData = z.output<typeof attendanceMarkSchema>;

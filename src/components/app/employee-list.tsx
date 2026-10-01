@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ChevronRight, Contact, FileBadge } from "lucide-react";
 import type { EmployeeBasicDTO, EmployeeListItem, EmployeeStatusFilter } from "@/lib/services/employees";
-import { toPaise } from "@/lib/money";
+import { fromPaise, toPaise } from "@/lib/money";
 import { formatDate, formatMoney } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -59,7 +59,15 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
                 <span className="text-muted-foreground">{e.joinedAt ? `Joined ${formatDate(e.joinedAt)}` : "Joining date not set"}</span>
                 <span className="text-right">
                   <span className="block font-semibold tabular-nums">{formatMoney(e.monthlySalary, currencySymbol)}<span className="text-xs font-normal text-muted-foreground">/mo</span></span>
+                  {toPaise(e.absenceCutThisMonth) > 0 ? (
+                    <span className="block text-xs text-destructive tabular-nums">
+                      − {formatMoney(e.absenceCutThisMonth, currencySymbol)} for {e.cutDaysThisMonth} day{e.cutDaysThisMonth === 1 ? "" : "s"} off
+                    </span>
+                  ) : null}
                   {toPaise(e.advancesThisMonth) > 0 ? <span className="block text-xs text-amber-700 tabular-nums dark:text-amber-300">Took {formatMoney(e.advancesThisMonth, currencySymbol)} this month</span> : null}
+                  {e.monthlySalary && (toPaise(e.absenceCutThisMonth) > 0 || toPaise(e.advancesThisMonth) > 0) ? (
+                    <span className="block text-xs font-medium tabular-nums">To pay {formatMoney(toPay(e), currencySymbol)}</span>
+                  ) : null}
                 </span>
               </div>
             </Link>
@@ -70,7 +78,7 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
       {/* Desktop table */}
       <div className="hidden overflow-hidden rounded-2xl border bg-card shadow-xs lg:block">
         <div className="overflow-x-auto">
-          <Table className="min-w-[800px]">
+          <Table className="min-w-[960px]">
             <TableHeader>
               <TableRow className="bg-muted/50 hover:bg-muted/50">
                 <TableHead className="pl-4">Employee</TableHead>
@@ -78,7 +86,9 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
                 <TableHead>Phone</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="text-right">Monthly salary</TableHead>
-                <TableHead className="text-right">Taken this month</TableHead>
+                <TableHead className="text-right">Cut for days off</TableHead>
+                <TableHead className="text-right">Advances</TableHead>
+                <TableHead className="text-right">To pay this month</TableHead>
                 <TableHead>Documents</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="pr-4 text-right">Actions</TableHead>
@@ -97,7 +107,20 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
                   <TableCell className="text-sm tabular-nums">{e.phone ?? "—"}</TableCell>
                   <TableCell className="text-sm whitespace-nowrap">{e.joinedAt ? formatDate(e.joinedAt) : "—"}</TableCell>
                   <TableCell className="text-right font-medium tabular-nums">{formatMoney(e.monthlySalary, currencySymbol)}</TableCell>
-                  <TableCell className="text-right tabular-nums">{toPaise(e.advancesThisMonth) > 0 ? formatMoney(e.advancesThisMonth, currencySymbol) : "—"}</TableCell>
+                  <TableCell className="text-right tabular-nums">
+                    {toPaise(e.absenceCutThisMonth) > 0 ? (
+                      <span className="text-destructive">
+                        − {formatMoney(e.absenceCutThisMonth, currencySymbol)}
+                        <span className="block text-xs text-muted-foreground">
+                          {e.cutDaysThisMonth} day{e.cutDaysThisMonth === 1 ? "" : "s"}
+                        </span>
+                      </span>
+                    ) : (
+                      "—"
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{toPaise(e.advancesThisMonth) > 0 ? `− ${formatMoney(e.advancesThisMonth, currencySymbol)}` : "—"}</TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">{e.monthlySalary ? formatMoney(toPay(e), currencySymbol) : "—"}</TableCell>
                   <TableCell className="text-sm">
                     <span className="inline-flex items-center gap-1">
                       <FileBadge className="size-3.5 text-muted-foreground" /> {e.documentCount}
@@ -119,6 +142,11 @@ export function EmployeeList({ employees, currencySymbol, query, status }: { emp
       </div>
     </>
   );
+}
+
+/** Salary − attendance cut − advances, for this month so far. */
+function toPay(e: EmployeeListItem) {
+  return fromPaise(toPaise(e.monthlySalary) - toPaise(e.absenceCutThisMonth) - toPaise(e.advancesThisMonth));
 }
 
 /** The manager's list: names only, each opening the page where advances are noted. */
