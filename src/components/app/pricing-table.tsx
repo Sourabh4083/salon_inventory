@@ -193,7 +193,7 @@ function EditPricesForm({ product, currencySymbol, close }: { product: ProductDT
       <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm">
         Profit per unit:{" "}
         {preview.profit != null ? (
-          <span className={cn("font-semibold tabular-nums", Number(preview.profit) < 0 ? "text-destructive" : "text-emerald-700")}>
+          <span className={cn("font-semibold tabular-nums", Number(preview.profit) < 0 ? "text-destructive" : "text-emerald-700 dark:text-emerald-300")}>
             {formatMoney(preview.profit, currencySymbol)}
             {preview.marginPct != null ? ` (${preview.marginPct}% margin, ${preview.markupPct ?? "—"}% markup)` : ""}
           </span>

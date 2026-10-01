@@ -33,29 +33,29 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const kpis = [
     { label: "Sales", value: money(report.revenue), sub: `${formatNumber(report.billCount)} ${report.billCount === 1 ? "bill" : "bills"}`, icon: Receipt, tone: "text-primary bg-primary/10" },
-    { label: "Products", value: money(report.productRevenue), sub: `${formatNumber(report.unitsSold)} units sold`, icon: Package, tone: "text-sky-700 bg-sky-100" },
-    { label: "Services", value: money(report.serviceRevenue), sub: "service income", icon: Scissors, tone: "text-violet-700 bg-violet-100" },
+    { label: "Products", value: money(report.productRevenue), sub: `${formatNumber(report.unitsSold)} units sold`, icon: Package, tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
+    { label: "Services", value: money(report.serviceRevenue), sub: "service income", icon: Scissors, tone: "text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-500/15" },
     {
       label: "Gross profit",
       value: money(report.grossProfit),
       sub: `after ${money(report.cost)} product cost`,
       icon: TrendingUp,
-      tone: profitPositive ? "text-emerald-700 bg-emerald-100" : "text-red-700 bg-red-100",
+      tone: profitPositive ? "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15" : "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15",
     },
-    { label: "Expenses", value: money(expenses), sub: "shop spending", icon: Wallet, tone: "text-amber-700 bg-amber-100" },
+    { label: "Expenses", value: money(expenses), sub: "shop spending", icon: Wallet, tone: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" },
     {
       label: "Product purchases",
       value: money(purchases.total),
       sub: `${formatNumber(purchases.units)} ${purchases.units === 1 ? "unit" : "units"} received`,
       icon: Truck,
-      tone: "text-orange-700 bg-orange-100",
+      tone: "text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-500/15",
     },
     {
       label: "Sales − expenses",
       value: money(net),
       sub: "money left after spending",
       icon: PiggyBank,
-      tone: netPositive ? "text-emerald-700 bg-emerald-100" : "text-red-700 bg-red-100",
+      tone: netPositive ? "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15" : "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15",
     },
   ];
 

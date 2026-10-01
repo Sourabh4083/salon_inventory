@@ -3,6 +3,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { SidebarNav } from "@/components/app/sidebar-nav";
 import { MobileNav } from "@/components/app/mobile-nav";
 import { LogoutButton } from "@/components/app/logout-button";
+import { ThemeToggle } from "@/components/app/theme-toggle";
 import { RoleProvider } from "@/components/app/role-context";
 
 export function AppShell({
@@ -20,11 +21,14 @@ export function AppShell({
       {/* Desktop / tablet sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-64 shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex">
         <div className="flex items-center gap-3 px-5 py-5">
-          <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Scissors className="size-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate font-heading text-base leading-tight">{businessName}</p>
+            {/* Long shop names wrap onto a second line instead of being cut off. */}
+            <p className="line-clamp-2 font-heading text-[15px] leading-tight" title={businessName}>
+              {businessName}
+            </p>
             <p className="text-[11px] tracking-wide text-sidebar-foreground/60 uppercase">Inventory</p>
           </div>
         </div>
@@ -40,6 +44,7 @@ export function AppShell({
               <p className="truncate text-sm font-medium">{user.name}</p>
               <p className="truncate text-xs text-sidebar-foreground/60 capitalize">{user.role.toLowerCase()}</p>
             </div>
+            <ThemeToggle />
             <LogoutButton variant="icon" />
           </div>
         </div>

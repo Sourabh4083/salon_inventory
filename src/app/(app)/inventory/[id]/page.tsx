@@ -80,7 +80,7 @@ export default async function ProductDetailPage({
       </Link>
 
       {from === "scan" ? (
-        <p className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2.5 text-sm text-emerald-900">Barcode matched this product.</p>
+        <p className="rounded-xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-2.5 text-sm text-emerald-900 dark:text-emerald-200">Barcode matched this product.</p>
       ) : null}
 
       <div className={showHistory ? "grid grid-cols-1 gap-6 lg:grid-cols-3" : "mx-auto max-w-4xl"}>

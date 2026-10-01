@@ -28,7 +28,7 @@ export function QuickActions({ currencySymbol }: { currencySymbol: string }) {
           </span>
         </Link>
         <button type="button" className={tile} onClick={() => setStep({ kind: "stockIn", product: null })}>
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
             <ArrowDownToLine className="size-5" />
           </span>
           <span>
@@ -37,7 +37,7 @@ export function QuickActions({ currencySymbol }: { currencySymbol: string }) {
           </span>
         </button>
         <Link href="/billing/new" className={tile}>
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-rose-100 dark:bg-rose-500/15 text-rose-700 dark:text-rose-300">
             <Receipt className="size-5" />
           </span>
           <span>
@@ -46,7 +46,7 @@ export function QuickActions({ currencySymbol }: { currencySymbol: string }) {
           </span>
         </Link>
         <Link href="/scan" className={tile}>
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-sky-100 dark:bg-sky-500/15 text-sky-700 dark:text-sky-300">
             <ScanBarcode className="size-5" />
           </span>
           <span>

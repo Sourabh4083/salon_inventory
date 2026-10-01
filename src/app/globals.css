@@ -2,7 +2,14 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* Night mode is screen-only, so receipts always print in the light colours. */
+@custom-variant dark {
+  @media screen {
+    &:is(.dark *) {
+      @slot;
+    }
+  }
+}
 
 @theme inline {
   --color-background: var(--background);
@@ -92,42 +99,50 @@
   --sidebar-ring: oklch(0.6 0.12 345);
 }
 
-.dark {
-  --background: oklch(0.17 0.015 330);
-  --foreground: oklch(0.96 0.005 75);
-  --card: oklch(0.22 0.02 330);
-  --card-foreground: oklch(0.96 0.005 75);
-  --popover: oklch(0.22 0.02 330);
-  --popover-foreground: oklch(0.96 0.005 75);
-  --primary: oklch(0.75 0.12 345);
-  --primary-foreground: oklch(0.2 0.03 330);
-  --secondary: oklch(0.28 0.03 335);
-  --secondary-foreground: oklch(0.96 0.005 75);
-  --muted: oklch(0.27 0.02 330);
-  --muted-foreground: oklch(0.7 0.015 330);
-  --accent: oklch(0.3 0.04 340);
-  --accent-foreground: oklch(0.96 0.005 75);
-  --destructive: oklch(0.7 0.19 22);
-  --success: oklch(0.72 0.14 150);
-  --success-foreground: oklch(0.15 0 0);
-  --warning: oklch(0.8 0.15 70);
-  --warning-foreground: oklch(0.2 0.05 65);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.6 0.12 345);
-  --chart-1: oklch(0.75 0.12 345);
-  --chart-2: oklch(0.8 0.15 70);
-  --chart-3: oklch(0.72 0.14 150);
-  --chart-4: oklch(0.7 0.19 22);
-  --chart-5: oklch(0.7 0.015 330);
-  --sidebar: oklch(0.2 0.02 330);
-  --sidebar-foreground: oklch(0.93 0.01 60);
-  --sidebar-primary: oklch(0.75 0.12 345);
-  --sidebar-primary-foreground: oklch(0.2 0.03 330);
-  --sidebar-accent: oklch(0.28 0.03 335);
-  --sidebar-accent-foreground: oklch(0.96 0.005 75);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.6 0.12 345);
+/*
+ * Night mode, kept easy on the eyes: warm charcoal instead of black, soft off-white
+ * instead of white (about 12:1 on the background), champagne gold for buttons and
+ * highlights, and toned-down status colours.
+ */
+@media screen {
+  .dark {
+    color-scheme: dark;
+    --background: oklch(0.235 0.012 335);
+    --foreground: oklch(0.905 0.006 75);
+    --card: oklch(0.275 0.014 335);
+    --card-foreground: oklch(0.905 0.006 75);
+    --popover: oklch(0.275 0.014 335);
+    --popover-foreground: oklch(0.905 0.006 75);
+    --primary: oklch(0.76 0.06 85);
+    --primary-foreground: oklch(0.22 0.02 60);
+    --secondary: oklch(0.32 0.022 335);
+    --secondary-foreground: oklch(0.905 0.006 75);
+    --muted: oklch(0.305 0.014 335);
+    --muted-foreground: oklch(0.72 0.012 335);
+    --accent: oklch(0.34 0.03 340);
+    --accent-foreground: oklch(0.905 0.006 75);
+    --destructive: oklch(0.72 0.13 25);
+    --success: oklch(0.76 0.1 155);
+    --success-foreground: oklch(0.18 0 0);
+    --warning: oklch(0.79 0.11 80);
+    --warning-foreground: oklch(0.2 0.05 65);
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 14%);
+    --ring: oklch(0.66 0.06 85);
+    --chart-1: oklch(0.76 0.06 85);
+    --chart-2: oklch(0.79 0.11 80);
+    --chart-3: oklch(0.76 0.1 155);
+    --chart-4: oklch(0.72 0.13 25);
+    --chart-5: oklch(0.72 0.012 335);
+    --sidebar: oklch(0.205 0.012 335);
+    --sidebar-foreground: oklch(0.88 0.008 60);
+    --sidebar-primary: oklch(0.76 0.06 85);
+    --sidebar-primary-foreground: oklch(0.22 0.02 60);
+    --sidebar-accent: oklch(0.3 0.02 335);
+    --sidebar-accent-foreground: oklch(0.905 0.006 75);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.66 0.06 85);
+  }
 }
 
 @layer base {

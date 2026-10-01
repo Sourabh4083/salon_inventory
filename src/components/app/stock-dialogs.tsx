@@ -247,7 +247,7 @@ function AdjustForm({ product, close, onDone }: FormProps) {
       <ProductSummary product={product} />
       <Field label="New physical quantity" htmlFor={`${id}-qty`} error={error ?? fieldErr.newQuantity} required>
         <QuantityStepper id={`${id}-qty`} value={qty} onChange={(v) => { setQty(v); setError(null); }} min={0} autoFocus />
-        <p className={`text-xs ${diff === 0 ? "text-muted-foreground" : diff > 0 ? "text-emerald-700" : "text-red-700"}`}>
+        <p className={`text-xs ${diff === 0 ? "text-muted-foreground" : diff > 0 ? "text-emerald-700 dark:text-emerald-300" : "text-red-700 dark:text-red-300"}`}>
           System: {product.quantity} · Difference: {diff > 0 ? "+" : ""}{diff}
         </p>
       </Field>
