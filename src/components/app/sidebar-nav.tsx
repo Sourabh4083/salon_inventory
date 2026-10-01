@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   BadgePercent,
   BarChart3,
+  CalendarCheck2,
   Contact,
   Receipt,
   ReceiptText,
@@ -15,6 +16,7 @@ import {
   Truck,
   Wallet,
   PackageX,
+  PhoneCall,
   ScanBarcode,
   Settings,
   Users,
@@ -39,6 +41,8 @@ const ICONS: Record<NavItem["icon"], React.ComponentType<{ className?: string }>
   employees: Contact,
   orders: Truck,
   expenses: Wallet,
+  calls: PhoneCall,
+  attendance: CalendarCheck2,
 };
 
 export function SidebarNav({ role, onNavigate, className }: { role: Role; onNavigate?: () => void; className?: string }) {

@@ -6,6 +6,8 @@ import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getEmployee, getEmployeeBasic, getEmployeeSalary } from "@/lib/services/employees";
 import { listAdvances } from "@/lib/services/advances";
+import { employeeAttendanceMonth } from "@/lib/services/attendance";
+import { EmployeeAttendance } from "@/components/app/attendance";
 import { can } from "@/lib/permissions";
 import { formatMonth, isMonthParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
@@ -26,12 +28,12 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
 export default async function EmployeeDetailPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ month?: string }> }) {
   const user = await requirePermissionPage("employee.view");
   const [{ id }, query] = await Promise.all([params, searchParams]);
-  const month = isMonthParam(query.month) ? query.month : toMonthParam();
+  const month = isMonthParam(query.month) && query.month <= toMonthParam() ? query.month : toMonthParam();
   if (!can(user.role, "employee.manage")) return <ManagerEmployeeView id={id} month={month} />;
 
-  const [settings, detail, advances] = await Promise.all([getSettings(), getEmployee(id, user), listAdvances(id, user, month)]);
-  if (!detail) notFound();
-  const { employee, documents, payments, paidThisYear, lastPaidOn, advancesThisMonth } = detail;
+  const [settings, detail, advances, attendance] = await Promise.all([getSettings(), getEmployee(id, user), listAdvances(id, user, month), employeeAttendanceMonth(id, month, user)]);
+  if (!detail || !attendance) notFound();
+  const { employee, documents, payments, paidThisYear, lastPaidOn } = detail;
   const sym = settings.currencySymbol;
 
   const facts: { icon: React.ComponentType<{ className?: string }>; label: string; value: React.ReactNode }[] = [
@@ -94,7 +96,8 @@ export default async function EmployeeDetailPage({ params, searchParams }: { par
       </section>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-        <SalaryPayments employee={employee} payments={payments} paidThisYear={paidThisYear} lastPaidOn={lastPaidOn} advancesThisMonth={advancesThisMonth} currencySymbol={sym} />
+        <SalaryPayments employee={employee} payments={payments} paidThisYear={paidThisYear} lastPaidOn={lastPaidOn} month={month} advances={advances.total} absence={attendance.summary} currencySymbol={sym} />
+        <EmployeeAttendance summary={attendance.summary} records={attendance.records} month={month} maxMonth={toMonthParam()} isOwner currencySymbol={sym} />
         <EmployeeAdvances employeeId={employee.id} employeeName={employee.name} advances={advances.items} total={advances.total} month={month} isOwner canAdd currencySymbol={sym} />
         <EmployeeDocuments employeeId={employee.id} documents={documents} />
       </div>
@@ -108,13 +111,21 @@ export default async function EmployeeDetailPage({ params, searchParams }: { par
  */
 async function ManagerEmployeeView({ id, month }: { id: string; month: string }) {
   const user = await requirePermissionPage("employee.view");
-  const [settings, employee, salary, advances] = await Promise.all([getSettings(), getEmployeeBasic(id, user), getEmployeeSalary(id, user), listAdvances(id, user, month)]);
-  if (!employee) notFound();
+  const [settings, employee, salary, advances, attendance] = await Promise.all([
+    getSettings(),
+    getEmployeeBasic(id, user),
+    getEmployeeSalary(id, user),
+    listAdvances(id, user, month),
+    employeeAttendanceMonth(id, month, user),
+  ]);
+  if (!employee || !attendance) notFound();
   const sym = settings.currencySymbol;
+  const cut = attendance.summary;
   const tiles = [
     { label: "Monthly salary", value: formatMoney(salary, sym) },
+    { label: `Cut for ${cut.cutDays} day${cut.cutDays === 1 ? "" : "s"} off in ${formatMonth(month)}`, value: `− ${formatMoney(cut.deduction, sym)}` },
     { label: `Advances in ${formatMonth(month)}`, value: `− ${formatMoney(advances.total, sym)}` },
-    { label: "To receive", value: formatMoney(salary ? fromPaise(toPaise(salary) - toPaise(advances.total)) : null, sym) },
+    { label: "To receive", value: formatMoney(salary ? fromPaise(toPaise(salary) - toPaise(cut.deduction) - toPaise(advances.total)) : null, sym) },
   ];
 
   return (
@@ -159,7 +170,7 @@ async function ManagerEmployeeView({ id, month }: { id: string; month: string })
         <h2 id="salary-heading" className="flex items-center gap-2 font-heading text-lg">
           <Banknote className="size-4.5 text-primary" /> Salary
         </h2>
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3 sm:gap-3">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
           {tiles.map((t) => (
             <div key={t.label} className="rounded-2xl border bg-card p-3 shadow-xs sm:p-4">
               <p className="text-xs text-muted-foreground">{t.label}</p>
@@ -168,6 +179,8 @@ async function ManagerEmployeeView({ id, month }: { id: string; month: string })
           ))}
         </div>
       </section>
+
+      <EmployeeAttendance summary={attendance.summary} records={attendance.records} month={month} maxMonth={toMonthParam()} isOwner={false} currencySymbol={sym} />
 
       <EmployeeAdvances
         employeeId={employee.id}

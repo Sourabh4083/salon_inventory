@@ -5,6 +5,7 @@ import { AppError } from "@/lib/errors";
 import type { SessionUser } from "@/lib/auth/session";
 import { recordAudit } from "@/lib/services/audit";
 import { applyChange, lockProduct } from "@/lib/services/inventory";
+import { closeEnquiryForBill } from "@/lib/services/enquiries";
 import { fromPaise, toPaise } from "@/lib/money";
 import { APP_TIMEZONE, runtimeZone } from "@/lib/timezone";
 import { endOfDay, startOfDay } from "@/lib/dates";
@@ -250,6 +251,8 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
         billId: bill.id,
       });
     }
+
+    await closeEnquiryForBill(tx, bill, actor.id);
 
     await recordAudit(tx, {
       action: "BILL_CREATED",
