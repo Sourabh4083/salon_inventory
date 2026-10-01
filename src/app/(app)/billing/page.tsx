@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
 import { parsePaging } from "@/lib/paging";
 import Link from "next/link";
-import { HandCoins, Plus, ReceiptText } from "lucide-react";
+import { HandCoins, Hourglass, Plus, ReceiptText } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getOutstanding, listBills } from "@/lib/services/billing";
+import { listOpenBills } from "@/lib/services/open-bills";
 import type { BillStatus } from "@/generated/prisma/enums";
 import { resolveRange } from "@/lib/dates";
 import { formatMoney, formatRelative } from "@/lib/format";
@@ -27,10 +28,11 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
   const unpaid = params.status === "UNPAID";
   const status = STATUSES.has(params.status as BillStatus) ? (params.status as BillStatus) : undefined;
   const range = params.range ? resolveRange({ range: params.range }) : null;
-  const [settings, result, outstanding] = await Promise.all([
+  const [settings, result, outstanding, openBills] = await Promise.all([
     getSettings(),
     listBills({ search: params.q, status, unpaid, from: range?.from, to: range?.to, ...parsePaging(params) }),
     getOutstanding(),
+    can(user.role, "bill.create") ? listOpenBills() : [],
   ]);
   const sym = settings.currencySymbol;
   const filtered = Boolean(params.q || status || unpaid || range);
@@ -49,6 +51,31 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
           </>
         }
       />
+      {openBills.length > 0 ? (
+        <section className="space-y-2">
+          <h2 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <Hourglass className="size-4" /> Open bills · customers in the shop
+          </h2>
+          <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {openBills.map((o) => (
+              <li key={o.id}>
+                <Link href={`/billing/new?open=${o.id}`} className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-xs transition-shadow hover:shadow-md">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{o.employeeName}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {o.customerName ? `${o.customerName} · ` : ""}
+                      {o.itemCount} {o.itemCount === 1 ? "item" : "items"} · opened {formatRelative(o.createdAt)}
+                    </p>
+                    <p className="mt-1 truncate text-sm text-muted-foreground">{o.lines.map((l) => (l.quantity > 1 ? `${l.quantity}× ${l.name}` : l.name)).join(", ")}</p>
+                  </div>
+                  <p className="text-lg font-semibold tabular-nums">{formatMoney(o.total, sym)}</p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <BillFilters />
 
       {outstanding.count > 0 ? (

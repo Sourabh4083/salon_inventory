@@ -158,6 +158,12 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
   }
 
   const billId = await prisma.$transaction(async (tx) => {
+    // Completing an open bill removes it in the same transaction, so it can't become two bills.
+    if (data.openBillId) {
+      const { count } = await tx.openBill.deleteMany({ where: { id: data.openBillId } });
+      if (!count) throw new AppError("This open bill was already completed or discarded.", "CONFLICT");
+    }
+
     const productIds = [...productQty.keys()].sort();
     const products = new Map<string, Awaited<ReturnType<typeof lockProduct>>>();
     for (const id of productIds) {
