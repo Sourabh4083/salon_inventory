@@ -41,9 +41,9 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
   const kpis = [
     { label: "Total Products", value: stats.totalProducts, icon: Package, href: "/inventory", tone: "text-primary bg-primary/10" },
-    { label: "Units in Stock", value: stats.totalUnits, icon: Boxes, href: "/inventory", tone: "text-sky-700 bg-sky-100" },
-    { label: "Low Stock", value: stats.lowStockCount, icon: AlertTriangle, href: "/inventory/low-stock", tone: "text-amber-700 bg-amber-100" },
-    { label: "Out of Stock", value: stats.outOfStockCount, icon: PackageX, href: "/inventory/out-of-stock", tone: "text-red-700 bg-red-100" },
+    { label: "Units in Stock", value: stats.totalUnits, icon: Boxes, href: "/inventory", tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
+    { label: "Low Stock", value: stats.lowStockCount, icon: AlertTriangle, href: "/inventory/low-stock", tone: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" },
+    { label: "Out of Stock", value: stats.outOfStockCount, icon: PackageX, href: "/inventory/out-of-stock", tone: "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15" },
   ];
 
   return (
@@ -54,7 +54,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
       />
 
       {denied ? (
-        <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <p role="alert" className="rounded-xl border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 px-4 py-3 text-sm text-amber-900 dark:text-amber-200">
           That page is only available to the owner account.
         </p>
       ) : null}
@@ -78,8 +78,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
 
       {today ? (
         <section aria-label="Sales today" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Link href="/reports?range=today" className="group flex items-center gap-4 rounded-2xl border bg-primary p-4 text-primary-foreground shadow-xs transition-shadow hover:shadow-md sm:col-span-2 sm:p-5">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/15">
+          <Link href="/reports?range=today" className="group flex items-center gap-4 rounded-2xl border bg-primary p-4 text-primary-foreground shadow-xs dark:border-primary/30 dark:bg-primary/15 dark:text-foreground transition-shadow hover:shadow-md sm:col-span-2 sm:p-5">
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/15 dark:bg-primary/20 dark:text-primary">
               <Receipt className="size-5" />
             </span>
             <span className="min-w-0 flex-1">
@@ -92,7 +92,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             <ArrowRight className="size-5 opacity-0 transition-opacity group-hover:opacity-100" />
           </Link>
           <Link href="/reports?range=today" className="group rounded-2xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-md sm:p-5">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-100 text-emerald-700">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
               <TrendingUp className="size-4.5" />
             </span>
             <p className="mt-3 text-3xl font-semibold tabular-nums">{formatMoney(today.grossProfit, settings.currencySymbol)}</p>
@@ -120,7 +120,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <section className="space-y-3" aria-labelledby="low-heading">
           <div className="flex items-center justify-between">
             <h2 id="low-heading" className="flex items-center gap-2 font-heading text-lg">
-              <AlertTriangle className="size-4.5 text-amber-600" /> Low stock
+              <AlertTriangle className="size-4.5 text-amber-600 dark:text-amber-400" /> Low stock
             </h2>
             <Button variant="ghost" size="sm" render={<Link href="/inventory/low-stock" />}>
               View all <ArrowRight />
@@ -132,7 +132,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <section className="space-y-3" aria-labelledby="out-heading">
           <div className="flex items-center justify-between">
             <h2 id="out-heading" className="flex items-center gap-2 font-heading text-lg">
-              <PackageX className="size-4.5 text-red-600" /> Out of stock
+              <PackageX className="size-4.5 text-red-600 dark:text-red-400" /> Out of stock
             </h2>
             <Button variant="ghost" size="sm" render={<Link href="/inventory/out-of-stock" />}>
               View all <ArrowRight />

@@ -102,7 +102,7 @@ export function BillReceipt({ bill, businessName, currencySymbol, className }: {
       {bill.notes ? <p className="mt-3 border-t border-dashed pt-3 text-xs text-muted-foreground">{bill.notes}</p> : null}
 
       {bill.status === "CANCELLED" ? (
-        <p className="mt-4 rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-center text-xs font-semibold tracking-wide text-red-700 uppercase print:bg-transparent">
+        <p className="mt-4 rounded-lg border border-red-300 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-3 py-2 text-center text-xs font-semibold tracking-wide text-red-700 dark:text-red-300 uppercase print:bg-transparent">
           Cancelled
         </p>
       ) : null}

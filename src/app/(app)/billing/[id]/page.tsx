@@ -43,7 +43,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
           }
         />
         {isNew && bill.status === "COMPLETED" ? (
-          <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+          <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-200">
             <CheckCircle2 className="size-4.5 shrink-0" /> Bill saved and stock updated. Print the receipt or start the next bill.
           </p>
         ) : null}
@@ -54,7 +54,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
           </p>
         ) : null}
         {bill.status === "CANCELLED" ? (
-          <p role="status" className="mb-4 rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <p role="status" className="mb-4 rounded-xl border border-red-300 dark:border-red-500/30 bg-red-50 dark:bg-red-500/10 px-4 py-3 text-sm text-red-900 dark:text-red-200">
             Cancelled {bill.cancelledAt ? formatDateTime(bill.cancelledAt) : ""} by {bill.cancelledByName ?? "owner"}: {bill.cancelReason}. Product stock was restored.
           </p>
         ) : null}

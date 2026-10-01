@@ -19,10 +19,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           className="pointer-events-none absolute -bottom-52 -left-32 size-[480px] rounded-full bg-accent/20 blur-3xl"
         />
         <div className="relative flex items-center gap-3">
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
             <Scissors className="size-5" />
           </span>
-          <span className="font-heading text-xl">{settings.businessName}</span>
+          <span className="font-heading text-xl leading-tight">{settings.businessName}</span>
         </div>
         <div className="relative max-w-md">
           <h1 className="font-heading text-4xl leading-tight">Know exactly what is on your shelves.</h1>
@@ -37,10 +37,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <section className="flex flex-1 items-center justify-center px-5 py-10 sm:px-8">
         <div className="w-full max-w-sm">
           <div className="mb-8 flex items-center gap-3 lg:hidden">
-            <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Scissors className="size-5" />
             </span>
-            <span className="font-heading text-xl">{settings.businessName}</span>
+            <span className="font-heading text-xl leading-tight">{settings.businessName}</span>
           </div>
           <h2 className="font-heading text-3xl">Welcome back</h2>
           <p className="mt-2 text-sm text-muted-foreground">Sign in to manage your inventory.</p>

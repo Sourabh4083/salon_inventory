@@ -33,21 +33,21 @@ export default async function PricingPage({ searchParams }: { searchParams: Prom
   const attention = summary.missingCost + summary.missingSelling + summary.belowCost;
 
   const tiles = [
-    { label: "Stock value at cost", value: formatMoney(summary.stockAtCost, sym), sub: `${formatNumber(summary.products)} active products`, icon: Boxes, tone: "text-sky-700 bg-sky-100" },
+    { label: "Stock value at cost", value: formatMoney(summary.stockAtCost, sym), sub: `${formatNumber(summary.products)} active products`, icon: Boxes, tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
     { label: "Stock value at selling price", value: formatMoney(summary.stockAtSelling, sym), sub: "if everything sells at list price", icon: Tags, tone: "text-primary bg-primary/10" },
     {
       label: "Potential profit",
       value: formatMoney(summary.potentialProfit, sym),
       sub: "selling value minus cost value",
       icon: TrendingUp,
-      tone: profitPositive ? "text-emerald-700 bg-emerald-100" : "text-red-700 bg-red-100",
+      tone: profitPositive ? "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15" : "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15",
     },
     {
       label: "Needs attention",
       value: formatNumber(attention),
       sub: `${summary.missingCost} no cost · ${summary.missingSelling} no price · ${summary.belowCost} below cost`,
       icon: AlertTriangle,
-      tone: attention ? "text-amber-700 bg-amber-100" : "text-emerald-700 bg-emerald-100",
+      tone: attention ? "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" : "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15",
     },
   ];
 

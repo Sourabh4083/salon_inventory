@@ -78,7 +78,7 @@ function UserRow({ user, isMe, onEdit, onPassword }: { user: UserDTO; isMe: bool
           {user.name}
           {isMe ? <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">You</span> : null}
           {!user.isActive ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-700 uppercase">
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 dark:bg-red-500/10 px-2 py-0.5 text-[11px] font-semibold text-red-700 dark:text-red-300 uppercase">
               <UserX className="size-3" /> Disabled
             </span>
           ) : user.role === "OWNER" ? (
