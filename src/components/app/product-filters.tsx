@@ -37,17 +37,24 @@ export function ProductFilters({
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep local state in sync when the URL changes from elsewhere (e.g. back button).
+  // Our own searches reach the URL a moment after they are typed, so they must never
+  // be copied back into the box: that would wipe the letters typed in the meantime.
   const urlQ = params.get("q") ?? "";
   const [seenUrlQ, setSeenUrlQ] = useState(urlQ);
+  const [pushedQ, setPushedQ] = useState(urlQ);
   if (urlQ !== seenUrlQ) {
     setSeenUrlQ(urlQ);
-    setQuery(urlQ);
+    if (!pending && urlQ !== pushedQ) {
+      setPushedQ(urlQ);
+      setQuery(urlQ);
+    }
   }
 
   const pushParams = (mutate: (p: URLSearchParams) => void) => {
     const next = new URLSearchParams(params.toString());
     mutate(next);
     next.delete("page");
+    setPushedQ(next.get("q") ?? "");
     const qs = next.toString();
     startTransition(() => router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false }));
   };
