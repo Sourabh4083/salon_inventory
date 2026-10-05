@@ -106,12 +106,14 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
 | Edit or cancel bills, manage services | ✓ | – |
 | View purchase orders, mark deliveries received | ✓ | ✓ |
 | Create, edit and close purchase orders | ✓ | – |
-| Record expenses and employee advances | ✓ | ✓ (own entries, today only) |
+| Record expenses | ✓ | ✓ (own entries, today only) |
+| Note an employee advance | ✓ | ✓ (today only) |
+| See, total or remove employee advances | ✓ | – |
 | Calls (leads) | ✓ | ✓ |
-| Mark attendance | ✓ | ✓ |
-| Decide whether a leave is paid | ✓ | – |
-| Employee list with names and monthly salary | ✓ | ✓ |
-| Employee details, documents, salary payments | ✓ | – |
+| Mark attendance, see attendance days | ✓ | ✓ |
+| Decide whether a leave is paid, see pay cut amounts | ✓ | – |
+| Employee names, designation, phone and joining date | ✓ | ✓ |
+| Salaries, personal details, documents, salary payments | ✓ | – |
 | Sales Reports, Excel export | ✓ | – |
 | Users, business settings, categories, audit log | ✓ | – |
 

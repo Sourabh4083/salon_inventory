@@ -27,7 +27,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
     const result = await listEmployeesBasic({ q: params.q, ...paging }, user);
     return (
       <div className="space-y-5">
-        <PageHeader title="Employees" description="Open an employee to note money they take from the shop today." />
+        <PageHeader title="Employees" description="Open an employee to see their attendance or note money they take from the shop today." />
         <Suspense>
           <EmployeeFilters showStatus={false} />
         </Suspense>
@@ -46,7 +46,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
     <div className="space-y-5">
       <PageHeader
         title="Employees"
-        description="Staff details, Aadhaar documents, advances and salary records. The manager sees names, salary and advances, and can note advances."
+        description="Staff details, Aadhaar documents, advances and salary records. The manager sees only names and attendance, and can note advances."
         actions={
           <>
             <DownloadExcelButton kind="salaries" label="Salaries & advances" />

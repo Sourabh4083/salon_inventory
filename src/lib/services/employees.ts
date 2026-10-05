@@ -248,14 +248,6 @@ export const getEmployeeBasic = cache(async (id: string, actor: SessionUser): Pr
   return toBasicDTO(row);
 });
 
-/** Monthly salary alone, so the manager can answer "how much will I get?". Same visibility as getEmployeeBasic. */
-export const getEmployeeSalary = cache(async (id: string, actor: SessionUser): Promise<string | null> => {
-  if (!can(actor.role, "salary.view")) throw new AppError("You cannot view salaries.", "FORBIDDEN");
-  const row = await prisma.employee.findUnique({ where: { id }, select: { monthlySalary: true, isActive: true } });
-  if (!row || (!row.isActive && actor.role !== "OWNER")) return null;
-  return row.monthlySalary ? row.monthlySalary.toString() : null;
-});
-
 /** Deduplicated per request (generateMetadata and the page both read it). */
 export const getEmployee = cache(async (id: string, actor: SessionUser): Promise<EmployeeDetail | null> => {
   assertOwner(actor);
