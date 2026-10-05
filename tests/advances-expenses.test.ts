@@ -1,6 +1,7 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { addSalaryPayment, createEmployee, getEmployee, getEmployeeBasic, getEmployeeSalary, listEmployees, listEmployeesBasic, setEmployeeActive } from "@/lib/services/employees";
+import { addSalaryPayment, createEmployee, getEmployee, getEmployeeBasic, listEmployees, listEmployeesBasic, setEmployeeActive } from "@/lib/services/employees";
+import { attendanceSummaries, employeeAttendanceMonth } from "@/lib/services/attendance";
 import { advanceTotalForMonth, deleteAdvance, listAdvances, recordAdvance } from "@/lib/services/advances";
 import { createExpense, deleteExpense, expenseTotal, listExpenses, updateExpense } from "@/lib/services/expenses";
 import { monthRange, toDateParam, toMonthParam } from "@/lib/dates";
@@ -27,7 +28,7 @@ beforeAll(async () => {
 
 describe("permissions", () => {
   it("manager can view employees and note advances and expenses, but not manage", () => {
-    for (const p of ["employee.view", "advance.record", "expense.record", "salary.view"] as const) expect(can("MANAGER", p)).toBe(true);
+    for (const p of ["employee.view", "advance.record", "expense.record"] as const) expect(can("MANAGER", p)).toBe(true);
     for (const p of ["employee.manage", "expense.manage", "bill.edit", "data.export"] as const) {
       expect(can("MANAGER", p)).toBe(false);
       expect(can("OWNER", p)).toBe(true);
@@ -46,8 +47,12 @@ describe("manager's view of employees", () => {
     await expect(listEmployees({}, manager)).rejects.toThrow(/owner/i);
   });
 
-  it("shows the monthly salary so the manager can answer pay questions", async () => {
-    expect(await getEmployeeSalary(employeeId, manager)).toBe("15000");
+  it("hides the salary and the pay cut amount in the attendance summary", async () => {
+    const mine = await employeeAttendanceMonth(employeeId, toMonthParam(), manager);
+    expect(mine!.summary).toMatchObject({ monthlySalary: null, perDay: null, deduction: "0.00" });
+    const all = await attendanceSummaries(toMonthParam(), manager);
+    expect(all.find((s) => s.employeeId === employeeId)).toMatchObject({ monthlySalary: null, perDay: null, deduction: "0.00" });
+    expect((await employeeAttendanceMonth(employeeId, toMonthParam(), owner))!.summary.monthlySalary).toBe("15000.00");
   });
 
   it("hides employees who have left", async () => {
@@ -55,7 +60,6 @@ describe("manager's view of employees", () => {
     await setEmployeeActive(gone.id, false, owner);
     expect((await listEmployeesBasic({}, manager)).items.map((e) => e.id)).not.toContain(gone.id);
     expect(await getEmployeeBasic(gone.id, manager)).toBeNull();
-    expect(await getEmployeeSalary(gone.id, manager)).toBeNull();
     await expect(recordAdvance(advanceSchema.parse({ employeeId: gone.id, amount: "100" }), manager)).rejects.toThrow(/left/i);
   });
 });
@@ -64,25 +68,24 @@ describe("advances", () => {
   it("manager records advances dated today, whatever date is sent", async () => {
     const a = await recordAdvance(advanceSchema.parse({ employeeId, amount: "500", note: "Bus fare", takenOn: "2020-01-01" }), manager);
     expect(toDateParam(new Date(a.takenOn))).toBe(toDateParam(new Date()));
-    expect(a.canDelete).toBe(true);
+    expect(a.canDelete).toBe(false);
     const audit = await prisma.auditLog.findFirst({ where: { action: "ADVANCE_RECORDED", entityId: employeeId } });
     expect(audit?.actorId).toBe(manager.id);
   });
 
-  it("owner can back-date; the manager sees the chosen month's entries", async () => {
+  it("owner can back-date and sees each month's entries; the manager sees none", async () => {
     const lastMonthDay = addDaysInZone(zonedDate(Number(toMonthParam().slice(0, 4)), Number(toMonthParam().slice(5)), 1), -5);
     await recordAdvance(advanceSchema.parse({ employeeId, amount: "700", takenOn: toDateParam(lastMonthDay) }), owner);
     await recordAdvance(advanceSchema.parse({ employeeId, amount: "250.50" }), owner);
 
-    const managerView = await listAdvances(employeeId, manager);
-    expect(managerView.items.map((a) => a.amount).sort()).toEqual(["250.5", "500"]);
-    expect(managerView.total).toBe("750.50");
-    const managerLastMonth = await listAdvances(employeeId, manager, toMonthParam(lastMonthDay));
-    expect(managerLastMonth.items.map((a) => a.amount)).toEqual(["700"]);
-    expect(managerLastMonth.items[0].canDelete).toBe(false);
+    await expect(listAdvances(employeeId, manager)).rejects.toThrow(/owner/i);
+    await expect(listAdvances(employeeId, manager, toMonthParam(lastMonthDay))).rejects.toThrow(/owner/i);
 
     const ownerView = await listAdvances(employeeId, owner);
+    expect(ownerView.items.map((a) => a.amount).sort()).toEqual(["250.5", "500"]);
+    expect(ownerView.items.every((a) => a.canDelete)).toBe(true);
     expect(ownerView.total).toBe("750.50");
+    expect((await listAdvances(employeeId, owner, toMonthParam(lastMonthDay))).items.map((a) => a.amount)).toEqual(["700"]);
     expect(await advanceTotalForMonth(employeeId, toMonthParam(lastMonthDay), owner)).toBe("700.00");
     await expect(advanceTotalForMonth(employeeId, toMonthParam(), manager)).rejects.toThrow(/owner/i);
   });
@@ -98,11 +101,12 @@ describe("advances", () => {
     expect(r.to.toISOString()).toBe("2026-09-30T18:29:59.999Z");
   });
 
-  it("a manager can remove only their own entries from today; the owner can remove any", async () => {
+  it("only the owner can remove an entry, even one the manager just made", async () => {
     const mine = await recordAdvance(advanceSchema.parse({ employeeId, amount: "40" }), manager);
     const others = await recordAdvance(advanceSchema.parse({ employeeId, amount: "60" }), otherManager);
-    await expect(deleteAdvance(others.id, manager)).rejects.toThrow(/only entries you made today/i);
-    await deleteAdvance(mine.id, manager);
+    await expect(deleteAdvance(others.id, manager)).rejects.toThrow(/owner/i);
+    await expect(deleteAdvance(mine.id, manager)).rejects.toThrow(/owner/i);
+    await deleteAdvance(mine.id, owner);
     await deleteAdvance(others.id, owner);
     expect(await prisma.employeeAdvance.count({ where: { id: { in: [mine.id, others.id] } } })).toBe(0);
   });

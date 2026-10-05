@@ -31,7 +31,6 @@ export type Permission =
   | "expense.manage"
   | "bill.edit"
   | "data.export"
-  | "salary.view"
   | "bill.collect"
   | "enquiry.manage"
   | "attendance.mark";
@@ -52,6 +51,7 @@ const MANAGER_PERMISSIONS: Permission[] = [
   "order.receive",
   // Staff take cash advances during the day; the manager notes them against the
   // employee (basic details only) and records the shop's small daily expenses.
+  // Noting is all: the advances already taken, salaries and pay cuts are owner-only.
   "employee.view",
   "advance.record",
   "expense.record",
@@ -61,9 +61,6 @@ const MANAGER_PERMISSIONS: Permission[] = [
   // The manager is in the shop every day, so they mark who came. Deciding whether a
   // leave is paid stays with the owner (employee.manage).
   "attendance.mark",
-  // When staff query their pay, the manager can show the monthly salary, the month's
-  // advances and the balance to receive (not payment records or personal details).
-  "salary.view",
 ];
 
 const OWNER_PERMISSIONS: Permission[] = [

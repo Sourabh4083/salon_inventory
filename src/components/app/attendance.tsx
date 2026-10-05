@@ -310,7 +310,7 @@ function cutBreakdown(s: AttendanceSummary) {
   return parts.length ? parts.join(" · ") : "Nothing cut";
 }
 
-export function AttendanceMonthTable({ summaries, month, currencySymbol }: { summaries: AttendanceSummary[]; month: string; currencySymbol: string }) {
+export function AttendanceMonthTable({ summaries, month, isOwner, currencySymbol }: { summaries: AttendanceSummary[]; month: string; isOwner: boolean; currencySymbol: string }) {
   if (!summaries.length) return <p className="rounded-2xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">No employees in {formatMonth(month)}.</p>;
   const head = "px-3 py-2 text-right text-xs font-semibold text-muted-foreground";
   const cell = "px-3 py-2.5 text-right tabular-nums";
@@ -327,7 +327,7 @@ export function AttendanceMonthTable({ summaries, month, currencySymbol }: { sum
             <th className={head}>Leave (paid / unpaid)</th>
             <th className={head}>Not marked</th>
             <th className={head}>Days cut</th>
-            <th className={head}>Pay cut</th>
+            {isOwner ? <th className={head}>Pay cut</th> : null}
           </tr>
         </thead>
         <tbody className="divide-y">
@@ -355,7 +355,7 @@ export function AttendanceMonthTable({ summaries, month, currencySymbol }: { sum
               </td>
               <td className={cn(cell, s.notMarked ? "font-medium text-orange-700 dark:text-orange-400" : "")}>{s.notMarked || "—"}</td>
               <td className={cell}>{s.cutDays || "—"}</td>
-              <td className={cn(cell, "font-semibold")}>{Number(s.deduction) > 0 ? `− ${formatMoney(s.deduction, currencySymbol)}` : "—"}</td>
+              {isOwner ? <td className={cn(cell, "font-semibold")}>{Number(s.deduction) > 0 ? `− ${formatMoney(s.deduction, currencySymbol)}` : "—"}</td> : null}
             </tr>
           ))}
         </tbody>
@@ -405,10 +405,12 @@ export function EmployeeAttendance({
       </div>
       <p className="rounded-lg border bg-muted/40 px-3 py-2 text-sm">
         <span className="font-medium">
-          Pay cut: {summary.cutDays ? `${summary.cutDays} day${summary.cutDays === 1 ? "" : "s"} × ${formatMoney(summary.perDay, currencySymbol)} = − ${formatMoney(summary.deduction, currencySymbol)}` : "none"}
+          {isOwner
+            ? `Pay cut: ${summary.cutDays ? `${summary.cutDays} day${summary.cutDays === 1 ? "" : "s"} × ${formatMoney(summary.perDay, currencySymbol)} = − ${formatMoney(summary.deduction, currencySymbol)}` : "none"}`
+            : `Days cut from pay: ${summary.cutDays || "none"}`}
         </span>
         <span className="block text-xs text-muted-foreground">
-          {cutBreakdown(summary)}. One day = salary ÷ {summary.daysInMonth} days in {formatMonth(month)}. One holiday a week is not cut.
+          {cutBreakdown(summary)}. {isOwner ? `One day = salary ÷ ${summary.daysInMonth} days in ${formatMonth(month)}. ` : ""}One holiday a week is not cut.
           {summary.notMarked ? ` ${summary.notMarked} day${summary.notMarked === 1 ? " is" : "s are"} not marked (not cut).` : ""}
         </span>
       </p>

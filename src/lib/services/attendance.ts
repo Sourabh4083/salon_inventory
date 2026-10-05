@@ -194,6 +194,11 @@ function summarise(e: EmployeeForSummary, records: RecordForSummary[], month: st
 
 const summaryEmployeeSelect = { id: true, name: true, designation: true, monthlySalary: true, joinedAt: true, leftAt: true } as const;
 
+/** Salaries are owner-only: for anyone else the summary counts the days but carries no money. */
+function forViewer<E extends EmployeeForSummary>(e: E, actor: SessionUser): E {
+  return can(actor.role, "employee.manage") ? e : { ...e, monthlySalary: null };
+}
+
 /** Month totals for everyone working (plus anyone with attendance that month). */
 export async function attendanceSummaries(month: string, actor: SessionUser, now = new Date()): Promise<AttendanceSummary[]> {
   assertCanMark(actor);
@@ -207,7 +212,7 @@ export async function attendanceSummaries(month: string, actor: SessionUser, now
   });
   return employees.map((e) =>
     summarise(
-      e,
+      forViewer(e, actor),
       records.filter((r) => r.employeeId === e.id),
       month,
       now,
@@ -230,7 +235,7 @@ export async function employeeAttendanceMonth(
   ]);
   if (!employee) return null;
   return {
-    summary: summarise(employee, records, month, now),
+    summary: summarise(forViewer(employee, actor), records, month, now),
     records: records.map((r) => ({ id: r.id, date: toDateParam(r.date), status: r.status, leavePaid: r.leavePaid, markedByName: r.markedBy.name })),
   };
 }

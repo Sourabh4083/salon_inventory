@@ -27,7 +27,7 @@ export async function recordAdvanceAction(input: AdvanceInput): Promise<ActionRe
 
 export async function deleteAdvanceAction(advanceId: string): Promise<ActionResult> {
   try {
-    const user = await requirePermission("advance.record");
+    const user = await requirePermission("employee.manage");
     const { employeeId } = await deleteAdvance(advanceId, user);
     revalidateEmployee(employeeId);
     return { ok: true, data: undefined };

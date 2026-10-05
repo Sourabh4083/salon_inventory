@@ -24,14 +24,15 @@ import {
 } from "@/components/ui/alert-dialog";
 
 /**
- * Money the employee took from the shop. Manager and owner browse any month and see its
- * total, which is deducted at salary time; the manager adds entries for today only.
+ * Money the employee took from the shop. The owner browses any month and sees its total,
+ * which is deducted at salary time. The manager only gets the button to note an advance
+ * for today: what was already taken stays with the owner.
  */
 export function EmployeeAdvances({
   employeeId,
   employeeName,
-  advances,
-  total,
+  advances = [],
+  total = "0",
   month,
   isOwner,
   canAdd,
@@ -39,9 +40,9 @@ export function EmployeeAdvances({
 }: {
   employeeId: string;
   employeeName: string;
-  advances: AdvanceDTO[];
-  total: string;
-  /** The month being shown ("2026-09"); enables the month picker and total. */
+  /** Owner only: the month's entries, their total and the month shown ("2026-09"). */
+  advances?: AdvanceDTO[];
+  total?: string;
   month?: string;
   isOwner: boolean;
   canAdd: boolean;
@@ -84,7 +85,7 @@ export function EmployeeAdvances({
           <HandCoins className="size-4.5 text-primary" /> Advances
         </h2>
         <div className="flex flex-wrap items-center gap-2">
-          {month ? (
+          {isOwner && month ? (
             <Input type="month" className="h-11 w-44" value={month} onChange={(e) => setMonth(e.target.value)} aria-label="Month" />
           ) : null}
           {canAdd ? (
@@ -101,11 +102,12 @@ export function EmployeeAdvances({
           <p className="mt-1 text-2xl font-semibold tabular-nums">{formatMoney(total, currencySymbol)}</p>
         </div>
       ) : (
-        // The manager's page shows the month's total in the salary tiles above.
-        <p className="text-sm text-muted-foreground">Note any money {employeeName} takes from the shop today. The owner deducts it from the salary at month end.</p>
+        <p className="text-sm text-muted-foreground">
+          Note any money {employeeName} takes from the shop today. Only the owner can see or change what has been noted, so check the amount before saving.
+        </p>
       )}
 
-      {advances.length ? (
+      {!isOwner ? null : advances.length ? (
         <ul className={`divide-y rounded-2xl border bg-card shadow-xs ${switching ? "opacity-60" : ""}`}>
           {advances.map((a) => (
             <li key={a.id} className="flex items-center gap-3 px-4 py-3">

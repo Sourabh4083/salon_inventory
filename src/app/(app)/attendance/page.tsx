@@ -53,7 +53,7 @@ export default async function AttendancePage({ searchParams }: { searchParams: P
             <MonthPicker month={month} max={toMonthParam()} />
           </Suspense>
         </div>
-        <AttendanceMonthTable summaries={summaries} month={month} currencySymbol={settings.currencySymbol} />
+        <AttendanceMonthTable summaries={summaries} month={month} isOwner={isOwner} currencySymbol={settings.currencySymbol} />
         <p className="text-xs text-muted-foreground">Open an employee to see each day and, for the owner, to decide whether a leave is paid.</p>
       </div>
     );

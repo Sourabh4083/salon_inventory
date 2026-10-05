@@ -10,8 +10,8 @@ import type { AdvanceData } from "@/lib/validation/schemas";
 
 /**
  * Cash an employee takes from the shop during the month. The manager notes it on the
- * day it happens; both manager and owner can browse a month's entries and total, and
- * at month end the owner deducts it from the salary.
+ * day it happens but cannot see what was noted; only the owner browses the entries
+ * and totals, fixes mistakes and deducts them from the salary at month end.
  */
 
 export type AdvanceDTO = {
@@ -35,12 +35,6 @@ function isToday(d: Date, now = new Date()) {
   return d >= startOfDay(now) && d <= endOfDay(now);
 }
 
-/** Owner: anything. Manager: only what they entered themselves today. */
-function mayDelete(a: { createdById: string; createdAt: Date }, actor: SessionUser) {
-  if (actor.role === "OWNER") return true;
-  return a.createdById === actor.id && isToday(a.createdAt);
-}
-
 function toAdvanceDTO(a: AdvanceRow, actor: SessionUser): AdvanceDTO {
   return {
     id: a.id,
@@ -50,7 +44,7 @@ function toAdvanceDTO(a: AdvanceRow, actor: SessionUser): AdvanceDTO {
     note: a.note,
     createdAt: a.createdAt.toISOString(),
     createdByName: a.createdBy.name,
-    canDelete: mayDelete(a, actor),
+    canDelete: actor.role === "OWNER",
   };
 }
 
@@ -59,7 +53,7 @@ function assertCanRecord(actor: SessionUser) {
 }
 
 function assertOwner(actor: SessionUser) {
-  if (actor.role !== "OWNER") throw new AppError("Only the owner can see advance totals.", "FORBIDDEN");
+  if (actor.role !== "OWNER") throw new AppError("Only the owner can see or change advances.", "FORBIDDEN");
 }
 
 function sum(rows: { amount: Prisma.Decimal }[]) {
@@ -68,9 +62,9 @@ function sum(rows: { amount: Prisma.Decimal }[]) {
 
 /* ---------- Queries ---------- */
 
-/** The given month's entries for this employee (default: this month) and their total. */
+/** Owner: the given month's entries for this employee (default: this month) and their total. */
 export async function listAdvances(employeeId: string, actor: SessionUser, month?: string): Promise<AdvanceList> {
-  assertCanRecord(actor);
+  assertOwner(actor);
   const range = monthRange(month ?? toMonthParam());
   const rows = await prisma.employeeAdvance.findMany({
     where: { employeeId, takenOn: { gte: range.from, lte: range.to } },
@@ -131,11 +125,10 @@ export async function recordAdvance(input: AdvanceData, actor: SessionUser): Pro
 }
 
 export async function deleteAdvance(advanceId: string, actor: SessionUser): Promise<{ employeeId: string }> {
-  assertCanRecord(actor);
+  assertOwner(actor);
   return prisma.$transaction(async (tx) => {
     const advance = await tx.employeeAdvance.findUnique({ where: { id: advanceId }, include: { employee: { select: { name: true } } } });
     if (!advance) throw new AppError("Entry not found.", "NOT_FOUND");
-    if (!mayDelete(advance, actor)) throw new AppError("Only entries you made today can be removed. Ask the owner to fix older ones.", "FORBIDDEN");
     await tx.employeeAdvance.delete({ where: { id: advanceId } });
     await recordAudit(tx, {
       action: "ADVANCE_DELETED",
