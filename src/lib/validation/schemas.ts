@@ -184,6 +184,19 @@ const billBase = z.object({
   payLater: z.boolean().default(false),
   /** Pay later only: what was paid at the counter now (0 = nothing). */
   paidNow: moneyInput.transform((v) => v ?? "0"),
+  /**
+   * Counter money taken in more than one way, e.g. half cash and half UPI. When given it
+   * replaces "paymentMethod" and "paidNow": the parts must add up to the total, or to
+   * what a pay-later customer paid now.
+   */
+  split: z
+    .object({
+      CASH: moneyInput.transform((v) => v ?? "0"),
+      UPI: moneyInput.transform((v) => v ?? "0"),
+      CARD: moneyInput.transform((v) => v ?? "0"),
+    })
+    .nullish()
+    .transform((v) => v ?? null),
   notes: optionalText(500),
 });
 
@@ -269,6 +282,8 @@ export const orderReceiveSchema = z.object({
     z.literal("ALL"),
     z.array(z.object({ itemId: z.string().min(1), quantity: quantityInput })).min(1),
   ]),
+  /** How the shop paid for what arrived; its cost is taken from that account's balance. */
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
 });
 export type OrderReceiveInput = z.input<typeof orderReceiveSchema>;
 export type OrderReceiveData = z.output<typeof orderReceiveSchema>;
@@ -422,6 +437,7 @@ export const advanceSchema = z.object({
   amount: positiveMoney,
   /** Owner only; the manager's entries are always dated today. */
   takenOn: optionalDateInput,
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   note: optionalText(300),
 });
 export type AdvanceInput = z.input<typeof advanceSchema>;
@@ -438,6 +454,26 @@ export const expenseSchema = z.object({
 });
 export type ExpenseInput = z.input<typeof expenseSchema>;
 export type ExpenseData = z.output<typeof expenseSchema>;
+
+// ---- Money in hand ----
+
+const balanceAmount = moneyInput.transform((v, ctx) => {
+  if (v === null) {
+    ctx.addIssue({ code: "custom", message: "Enter the amount (0 if there is none)." });
+    return z.NEVER;
+  }
+  return v;
+});
+
+/** What the owner counted in the drawer and the bank right now. */
+export const balancesSchema = z.object({ cash: balanceAmount, bank: balanceAmount });
+export type BalancesInput = z.input<typeof balancesSchema>;
+export type BalancesData = z.output<typeof balancesSchema>;
+
+/** Cash the owner is carrying from the drawer to the bank. */
+export const cashDepositSchema = z.object({ amount: positiveMoney });
+export type CashDepositInput = z.input<typeof cashDepositSchema>;
+export type CashDepositData = z.output<typeof cashDepositSchema>;
 
 // ---- Bill editing (owner) ----
 

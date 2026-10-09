@@ -58,9 +58,14 @@ describe("placing an order", () => {
     expect(o.items[0].quantityOrdered).toBe(5);
   });
 
-  it("only the owner can place orders", async () => {
-    const p = await product("Manager Try");
-    await expect(createOrder(order([{ productId: p.id, quantity: 1 }]), manager)).rejects.toThrow(/owner/i);
+  it("a manager can place an order, but a cost they type is ignored", async () => {
+    const p = await product("Manager Order", { costPrice: "90" });
+    const o = await createOrder(order([{ productId: p.id, quantity: 2, unitCost: "1" }]), manager);
+    expect(o.status).toBe("ACTIVE");
+    // The line carries the owner's saved cost price, and the manager never gets it back.
+    expect(o.items[0].unitCost).toBe("90.00");
+    expect(orderForViewer(o, "MANAGER").items[0].unitCost).toBeNull();
+    await expect(updateOrder(o.id, order([{ productId: p.id, quantity: 5 }]), manager)).rejects.toThrow(/owner/i);
   });
 
   it("refuses archived products", async () => {
@@ -122,6 +127,19 @@ describe("receiving", () => {
     await expect(receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 3 }]), manager)).rejects.toThrow(/Only 2 of "Over Recv"/);
     await expect(receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 0 }]), manager)).rejects.toThrow(/Nothing to receive/);
     expect((await getProduct(p.id))?.quantity).toBe(0);
+  });
+
+  it("a line ordered without a cost is received at the cost price set since", async () => {
+    // A brand-new product added by the manager while ordering has no prices yet.
+    const fresh = await createProduct(productCreateSchema.parse({ name: "Brand New", categoryId, startingQuantity: 0 }), manager);
+    const o = await createOrder(order([{ productId: fresh.id, quantity: 3 }]), manager);
+    expect(o.items[0].unitCost).toBeNull();
+
+    await prisma.product.update({ where: { id: fresh.id }, data: { costPrice: "250" } });
+    await receiveOrder(receive(o.id, "ALL"), manager);
+    const movement = await prisma.stockMovement.findFirstOrThrow({ where: { purchaseOrderId: o.id } });
+    expect(movement.unitCost?.toFixed(2)).toBe("250.00");
+    expect((await getProduct(fresh.id))?.quantity).toBe(3);
   });
 
   it("skips a product deleted after ordering, and it doesn't hold the order open", async () => {

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Clock, CreditCard, Hourglass, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Trash2, X } from "lucide-react";
+import { Banknote, Clock, CreditCard, Hourglass, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Split, Trash2, X } from "lucide-react";
 import { lookupProductByCodeAction, quickSearchProductsAction } from "@/app/actions/products";
 import { createBillAction, discardOpenBillAction, saveOpenBillAction, updateBillAction } from "@/app/actions/billing";
 import type { ProductDTO } from "@/lib/services/products";
@@ -61,6 +61,8 @@ export type BillEditInit = {
   payLater: boolean;
   /** Pay later: what was paid at the counter. */
   paidNow: string;
+  /** Counter money taken in more than one way: what was paid by each. */
+  split: Record<PaymentMethod, string> | null;
   /** Set when money was collected after billing; payments are then managed on the bill page. */
   collectedLater: string | null;
   notes: string;
@@ -105,6 +107,8 @@ export function BillComposer({
   const [payment, setPayment] = useState<PaymentMethod>(edit?.paymentMethod ?? "CASH");
   const [payLater, setPayLater] = useState(edit?.payLater ?? false);
   const [paidNow, setPaidNow] = useState(edit?.paidNow ?? "");
+  const [split, setSplit] = useState(Boolean(edit?.split));
+  const [parts, setParts] = useState<Record<PaymentMethod, string>>(edit?.split ?? { CASH: "", UPI: "", CARD: "" });
   const paymentsLocked = Boolean(edit?.collectedLater);
   const [notes, setNotes] = useState(init?.notes ?? "");
   const [billedAt, setBilledAt] = useState(edit?.billedAt ?? "");
@@ -118,9 +122,20 @@ export function BillComposer({
     const subtotal = lines.reduce((sum, l) => sum + toPaise(l.unitPrice) * l.quantity, 0);
     const disc = Math.max(0, toPaise(discount));
     const total = Math.max(0, subtotal - disc);
-    const paid = payLater ? Math.max(0, toPaise(paidNow)) : total;
-    return { subtotal, discount: disc, total, discountTooBig: disc > subtotal, due: Math.max(0, total - paid), paidTooMuch: payLater && paid > total };
-  }, [lines, discount, payLater, paidNow]);
+    const splitSum = PAYMENTS.reduce((n, p) => n + Math.max(0, toPaise(parts[p.value])), 0);
+    const paid = split ? splitSum : payLater ? Math.max(0, toPaise(paidNow)) : total;
+    return {
+      subtotal,
+      discount: disc,
+      total,
+      discountTooBig: disc > subtotal,
+      due: Math.max(0, total - paid),
+      paidTooMuch: payLater && paid > total,
+      splitSum,
+      // A split on a bill paid in full has to add up to the total exactly.
+      splitOff: split && !payLater && splitSum !== total,
+    };
+  }, [lines, discount, payLater, paidNow, split, parts]);
 
   const addProduct = (p: ProductDTO) => {
     const available = availableFor(p);
@@ -183,6 +198,9 @@ export function BillComposer({
     }
     if (totals.discountTooBig) return setFormError("Discount cannot be more than the subtotal.");
     if (!paymentsLocked && totals.paidTooMuch) return setFormError("Paid now cannot be more than the bill total.");
+    if (!paymentsLocked && totals.splitOff) {
+      return setFormError(`The split adds up to ${formatMoney(fromPaise(totals.splitSum), currencySymbol)}, but the bill total is ${formatMoney(fromPaise(totals.total), currencySymbol)}.`);
+    }
     if (edit && !billedAt) return setFormError("Enter the bill date and time.");
     const payload = {
       items: lines.map((l) =>
@@ -195,7 +213,8 @@ export function BillComposer({
       discount,
       paymentMethod: payment,
       payLater,
-      paidNow: payLater ? paidNow : "",
+      paidNow: payLater && !split ? paidNow : "",
+      split: split ? parts : null,
       notes,
     };
     start(async () => {
@@ -458,41 +477,90 @@ export function BillComposer({
                 {PAYMENTS.map((p) => (
                   <PaymentOption
                     key={p.value}
-                    selected={!payLater && payment === p.value}
+                    selected={!payLater && !split && payment === p.value}
                     onClick={() => {
                       setPayLater(false);
+                      setSplit(false);
                       setPayment(p.value);
                     }}
                     icon={p.icon}
                     label={p.label}
                   />
                 ))}
-                <PaymentOption selected={payLater} onClick={() => setPayLater(true)} icon={Clock} label="Pay later" />
+                <PaymentOption
+                  selected={!payLater && split}
+                  onClick={() => {
+                    setPayLater(false);
+                    setSplit(true);
+                  }}
+                  icon={Split}
+                  label="Split"
+                />
+                <PaymentOption
+                  selected={payLater}
+                  onClick={() => {
+                    setPayLater(true);
+                    setSplit(false);
+                  }}
+                  icon={Clock}
+                  label="Pay later"
+                  className="col-span-2"
+                />
               </div>
+              {split && !payLater ? (
+                <div className="mt-3 space-y-2 rounded-xl border bg-muted/40 p-3">
+                  <SplitInputs parts={parts} onChange={setParts} currencySymbol={currencySymbol} invalid={totals.splitSum > totals.total} />
+                  <p className={cn("text-xs", totals.splitOff ? "font-medium text-destructive" : "text-muted-foreground")}>
+                    {totals.splitSum < totals.total
+                      ? `${formatMoney(fromPaise(totals.total - totals.splitSum), currencySymbol)} more to enter.`
+                      : totals.splitSum > totals.total
+                        ? `${formatMoney(fromPaise(totals.splitSum - totals.total), currencySymbol)} more than the bill total.`
+                        : "Adds up to the bill total."}
+                  </p>
+                </div>
+              ) : null}
               {payLater ? (
                 <div className="mt-3 space-y-2 rounded-xl border border-orange-200 bg-orange-50/60 p-3 dark:border-orange-500/30 dark:bg-orange-500/5">
-                  <div className="flex items-center justify-between gap-3">
-                    <label htmlFor="bill-paid-now" className="text-sm font-medium">
-                      Paid now <span className="font-normal text-muted-foreground">(optional)</span>
-                    </label>
-                    <div className="relative w-32">
-                      <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
-                      <Input
-                        id="bill-paid-now"
-                        inputMode="decimal"
-                        value={paidNow}
-                        onChange={(e) => setPaidNow(e.target.value)}
-                        className={cn("h-9 bg-background pl-7 text-right tabular-nums", totals.paidTooMuch && "border-destructive")}
-                        placeholder="0"
-                        aria-invalid={Boolean(errors.paidNow)}
-                      />
+                  {split ? (
+                    <>
+                      <p className="text-sm font-medium">Paid now</p>
+                      <SplitInputs parts={parts} onChange={setParts} currencySymbol={currencySymbol} invalid={totals.paidTooMuch} />
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <label htmlFor="bill-paid-now" className="text-sm font-medium">
+                        Paid now <span className="font-normal text-muted-foreground">(optional)</span>
+                      </label>
+                      <div className="relative w-32">
+                        <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
+                        <Input
+                          id="bill-paid-now"
+                          inputMode="decimal"
+                          value={paidNow}
+                          onChange={(e) => setPaidNow(e.target.value)}
+                          className={cn("h-9 bg-background pl-7 text-right tabular-nums", totals.paidTooMuch && "border-destructive")}
+                          placeholder="0"
+                          aria-invalid={Boolean(errors.paidNow)}
+                        />
+                      </div>
                     </div>
-                  </div>
-                  {toPaise(paidNow) > 0 ? (
-                    <div className="grid grid-cols-3 gap-2" role="radiogroup" aria-label="Paid now by">
+                  )}
+                  {split || toPaise(paidNow) > 0 ? (
+                    <div className="grid grid-cols-4 gap-2" role="radiogroup" aria-label="Paid now by">
                       {PAYMENTS.map((p) => (
-                        <PaymentOption key={p.value} selected={payment === p.value} onClick={() => setPayment(p.value)} icon={p.icon} label={p.label} small />
+                        <PaymentOption
+                          key={p.value}
+                          selected={!split && payment === p.value}
+                          onClick={() => {
+                            setSplit(false);
+                            setPayment(p.value);
+                          }}
+                          icon={p.icon}
+                          label={p.label}
+                          small
+                        />
                       ))}
+                      <PaymentOption selected={split} onClick={() => setSplit(true)} icon={Split} label="Split" small />
                     </div>
                   ) : null}
                   <p className="text-xs text-muted-foreground">Enter the customer&apos;s name and phone. Collect the rest from the bill page.</p>
@@ -583,12 +651,14 @@ function PaymentOption({
   icon: Icon,
   label,
   small,
+  className,
 }: {
   selected: boolean;
   onClick: () => void;
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   small?: boolean;
+  className?: string;
 }) {
   return (
     <button
@@ -600,10 +670,47 @@ function PaymentOption({
         "flex items-center justify-center gap-2 rounded-xl border text-sm font-medium transition-colors",
         small ? "h-9" : "h-11",
         selected ? "border-primary bg-primary/10 text-primary" : "bg-background hover:bg-accent",
+        className,
       )}
     >
       <Icon className="size-4" /> {label}
     </button>
+  );
+}
+
+/** One amount box per payment method, for a bill paid partly one way and partly another. */
+function SplitInputs({
+  parts,
+  onChange,
+  currencySymbol,
+  invalid,
+}: {
+  parts: Record<PaymentMethod, string>;
+  onChange: (parts: Record<PaymentMethod, string>) => void;
+  currencySymbol: string;
+  invalid: boolean;
+}) {
+  return (
+    <>
+      {PAYMENTS.map(({ value, label, icon: Icon }) => (
+        <div key={value} className="flex items-center justify-between gap-3">
+          <label htmlFor={`bill-split-${value}`} className="flex items-center gap-2 text-sm font-medium">
+            <Icon className="size-4 text-muted-foreground" /> {label}
+          </label>
+          <div className="relative w-32">
+            <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
+            <Input
+              id={`bill-split-${value}`}
+              inputMode="decimal"
+              value={parts[value]}
+              onChange={(e) => onChange({ ...parts, [value]: e.target.value })}
+              className={cn("h-9 bg-background pl-7 text-right tabular-nums", invalid && "border-destructive")}
+              placeholder="0"
+            />
+          </div>
+        </div>
+      ))}
+    </>
   );
 }
 

@@ -4,7 +4,7 @@ import { AppError } from "@/lib/errors";
 import { can } from "@/lib/permissions";
 import { recordAudit } from "@/lib/services/audit";
 import { fromPaise, toPaise } from "@/lib/money";
-import { monthRange, startOfDay, toDateParam } from "@/lib/dates";
+import { monthRange, startOfDay, toDateParam, toMonthParam } from "@/lib/dates";
 import { addDaysInZone, zonedParts } from "@/lib/timezone";
 import { formatDate } from "@/lib/format";
 import type { SessionUser } from "@/lib/auth/session";
@@ -247,7 +247,56 @@ export async function absenceCutForMonth(employeeId: string, month: string, acto
   return { cutDays: data?.summary.cutDays ?? 0, deduction: data?.summary.deduction ?? "0.00" };
 }
 
-export type PendingLeaveDTO = { id: string; employeeId: string; name: string; date: string; markedByName: string };
+export type StaffPayRow = { employeeId: string; name: string; days: number; cutDays: number; amount: string };
+export type StaffPay = { total: string; staff: StaffPayRow[] };
+
+/**
+ * Owner's reports: what the staff cost over a period, by the same pay rules. Every day
+ * an employee was with the shop counts one day's pay, less that day's cut. Days still
+ * to come are left out.
+ */
+export async function staffPayForRange(range: { from: Date; to: Date }, now = new Date()): Promise<StaffPay> {
+  const from = startOfDay(range.from);
+  const today = startOfDay(now);
+  const to = startOfDay(range.to) > today ? today : startOfDay(range.to);
+  if (from > to) return { total: "0.00", staff: [] };
+  const [employees, records] = await Promise.all([
+    prisma.employee.findMany({
+      where: { monthlySalary: { not: null }, AND: [joinedBy(to), { OR: [{ isActive: true }, { leftAt: { gte: from } }] }] },
+      orderBy: { name: "asc" },
+      select: summaryEmployeeSelect,
+    }),
+    prisma.attendance.findMany({ where: { date: { gte: from, lte: to } }, select: { employeeId: true, date: true, status: true, leavePaid: true } }),
+  ]);
+  const marked = new Map(records.map((r) => [`${r.employeeId}|${toDateParam(r.date)}`, r]));
+  let total = 0;
+  const staff: StaffPayRow[] = [];
+  for (const e of employees) {
+    const salary = toPaise(e.monthlySalary!.toString());
+    const start = e.joinedAt && startOfDay(e.joinedAt) > from ? startOfDay(e.joinedAt) : from;
+    const end = e.leftAt && startOfDay(e.leftAt) < to ? startOfDay(e.leftAt) : to;
+    // Paid half days per month, so each month is divided by its own length.
+    const paidHalves = new Map<string, number>();
+    let days = 0;
+    let cutHalves = 0;
+    for (let d = start; d <= end; d = addDaysInZone(d, 1)) {
+      const r = marked.get(`${e.id}|${toDateParam(d)}`);
+      const cut = !r ? 0 : r.status === "ABSENT" || (r.status === "LEAVE" && r.leavePaid !== true) ? 2 : r.status === "HALF_DAY" ? 1 : 0;
+      const month = toMonthParam(d);
+      paidHalves.set(month, (paidHalves.get(month) ?? 0) + 2 - cut);
+      days++;
+      cutHalves += cut;
+    }
+    if (days === 0) continue;
+    let paise = 0;
+    for (const [month, halves] of paidHalves) paise += Math.round((salary * halves) / (2 * daysInMonth(month)));
+    total += paise;
+    staff.push({ employeeId: e.id, name: e.name, days, cutDays: cutHalves / 2, amount: fromPaise(paise) });
+  }
+  return { total: fromPaise(total), staff };
+}
+
+export type PendingLeaveDTO ={ id: string; employeeId: string; name: string; date: string; markedByName: string };
 
 /** Owner: leaves nobody has decided on yet, oldest first. */
 export async function pendingLeaves(actor: SessionUser): Promise<PendingLeaveDTO[]> {

@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
-import type { MovementType } from "@/generated/prisma/enums";
+import type { MovementType, PaymentMethod } from "@/generated/prisma/enums";
 import { AppError, InsufficientStockError } from "@/lib/errors";
 import type { SessionUser } from "@/lib/auth/session";
 import { getSettings } from "@/lib/services/settings";
@@ -13,6 +13,7 @@ import {
   type ProductDTO,
 } from "@/lib/services/products";
 import { PAGE_SIZE } from "@/lib/constants";
+import { fromPaise, toPaise } from "@/lib/money";
 
 export type StockChangeResult = { product: ProductDTO; movement: MovementDTO };
 
@@ -46,6 +47,7 @@ export async function applyChange(
     newQuantity: number;
     previousQuantity: number;
     unitCost?: string | null;
+    paymentMethod?: PaymentMethod | null;
     note?: string | null;
     actorId: string;
     billId?: string | null;
@@ -65,6 +67,7 @@ export async function applyChange(
       previousQuantity: args.previousQuantity,
       newQuantity: args.newQuantity,
       unitCost: args.unitCost ?? null,
+      paymentMethod: args.paymentMethod ?? null,
       note: args.note ?? null,
       performedById: args.actorId,
       billId: args.billId ?? null,
@@ -182,19 +185,22 @@ export type DashboardStats = {
   totalUnits: number;
   lowStockCount: number;
   outOfStockCount: number;
+  /** What the stock on the shelf cost (quantity x cost price), where a cost price is set. */
+  stockValue: string;
 };
 
 export async function getDashboardStats(): Promise<DashboardStats> {
   const settings = await getSettings();
   const t = settings.lowStockThreshold;
   const rows = await prisma.$queryRaw<
-    { total_products: bigint; total_units: bigint | null; low: bigint; out: bigint }[]
+    { total_products: bigint; total_units: bigint | null; low: bigint; out: bigint; stock_value: Prisma.Decimal | null }[]
   >`
     SELECT
       COUNT(*)                                                                  AS total_products,
       COALESCE(SUM(quantity), 0)                                                AS total_units,
       COUNT(*) FILTER (WHERE quantity >= 1 AND quantity <= COALESCE("lowStockThreshold", ${t})) AS low,
-      COUNT(*) FILTER (WHERE quantity <= 0)                                     AS out
+      COUNT(*) FILTER (WHERE quantity <= 0)                                     AS out,
+      COALESCE(SUM(quantity * "costPrice") FILTER (WHERE quantity > 0), 0)      AS stock_value
     FROM "Product"
     WHERE status = 'ACTIVE'`;
   const r = rows[0];
@@ -203,5 +209,6 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     totalUnits: Number(r?.total_units ?? 0),
     lowStockCount: Number(r?.low ?? 0),
     outOfStockCount: Number(r?.out ?? 0),
+    stockValue: fromPaise(toPaise(r?.stock_value?.toString() ?? "0")),
   };
 }

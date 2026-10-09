@@ -116,6 +116,7 @@ model User {
   editedBills       Bill[]             @relation("BillEditedBy")
   advances          EmployeeAdvance[]  @relation("AdvanceCreatedBy")
   expenses          Expense[]          @relation("ExpenseCreatedBy")
+  cashDeposits      CashDeposit[]      @relation("CashDepositCreatedBy")
   billPayments      BillPayment[]      @relation("BillPaymentCreatedBy")
   enquiries         Enquiry[]          @relation("EnquiryCreatedBy")
   enquiryCalls      EnquiryCall[]      @relation("EnquiryCallBy")
@@ -169,18 +170,20 @@ model Product {
 }
 
 model StockMovement {
-  id               String       @id @default(cuid())
+  id               String         @id @default(cuid())
   productId        String
   type             MovementType
   quantityChange   Int
   previousQuantity Int
   newQuantity      Int
-  unitCost         Decimal?     @db.Decimal(12, 2)
+  unitCost         Decimal?       @db.Decimal(12, 2)
+  /// How the shop paid for stock received on an order; null for every other movement.
+  paymentMethod    PaymentMethod?
   note             String?
   performedById    String
   billId           String?
   purchaseOrderId  String?
-  createdAt        DateTime     @default(now())
+  createdAt        DateTime       @default(now())
 
   product       Product        @relation(fields: [productId], references: [id])
   performedBy   User           @relation(fields: [performedById], references: [id])
@@ -351,12 +354,17 @@ model PurchaseOrderItem {
 }
 
 model BusinessSettings {
-  id                String   @id @default("default")
-  businessName      String   @default("Salon & Hair Studio")
-  currencyCode      String   @default("INR")
-  currencySymbol    String   @default("₹")
-  lowStockThreshold Int      @default(4)
-  updatedAt         DateTime @updatedAt
+  id                String    @id @default("default")
+  businessName      String    @default("Salon & Hair Studio")
+  currencyCode      String    @default("INR")
+  currencySymbol    String    @default("₹")
+  lowStockThreshold Int       @default(4)
+  /// What the owner counted in the cash drawer and the bank at `openingAt`; the running
+  /// balances start from here. All null until the owner sets them.
+  openingCash       Decimal?  @db.Decimal(12, 2)
+  openingBank       Decimal?  @db.Decimal(12, 2)
+  openingAt         DateTime?
+  updatedAt         DateTime  @updatedAt
 }
 
 model AuditLog {
@@ -447,13 +455,14 @@ model SalaryPayment {
 
 /// Money an employee takes from the shop during the month, deducted from their salary.
 model EmployeeAdvance {
-  id          String   @id @default(cuid())
-  employeeId  String
-  amount      Decimal  @db.Decimal(12, 2)
-  takenOn     DateTime
-  note        String?
-  createdById String
-  createdAt   DateTime @default(now())
+  id            String        @id @default(cuid())
+  employeeId    String
+  amount        Decimal       @db.Decimal(12, 2)
+  takenOn       DateTime
+  paymentMethod PaymentMethod @default(CASH)
+  note          String?
+  createdById   String
+  createdAt     DateTime      @default(now())
 
   employee  Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
   createdBy User     @relation("AdvanceCreatedBy", fields: [createdById], references: [id])
@@ -551,4 +560,18 @@ model Attendance {
 
   @@unique([employeeId, date])
   @@index([date])
+}
+
+/// Cash the owner carried from the drawer to the bank: Cash goes down and Bank goes up
+/// by the same amount. Not spending, so it never touches profit.
+model CashDeposit {
+  id          String   @id @default(cuid())
+  amount      Decimal  @db.Decimal(12, 2)
+  movedOn     DateTime
+  createdById String
+  createdAt   DateTime @default(now())
+
+  createdBy User @relation("CashDepositCreatedBy", fields: [createdById], references: [id])
+
+  @@index([movedOn])
 }

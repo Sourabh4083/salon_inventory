@@ -71,7 +71,7 @@ describe("route protection", () => {
   });
 
   it("manager can open dashboard and inventory but NOT owner-only pages", async () => {
-    for (const path of ["/dashboard", "/inventory", "/billing/new", "/employees", "/expenses", "/calls", "/attendance"]) {
+    for (const path of ["/dashboard", "/inventory", "/billing/new", "/employees", "/expenses", "/calls", "/attendance", "/orders", "/orders/new"]) {
       const res = await get(path, managerToken);
       expect(res.status, path).toBe(200);
     }

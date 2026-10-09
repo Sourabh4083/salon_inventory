@@ -105,7 +105,8 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
 | Record payments on pay-later bills | ✓ | ✓ |
 | Edit or cancel bills, manage services | ✓ | – |
 | View purchase orders, mark deliveries received | ✓ | ✓ |
-| Create, edit and close purchase orders | ✓ | – |
+| Place purchase orders, adding new products while ordering (no costs for the manager) | ✓ | ✓ |
+| Edit and close purchase orders, see order costs | ✓ | – |
 | Record expenses | ✓ | ✓ (own entries, today only) |
 | Note an employee advance | ✓ | ✓ (today only) |
 | See, total or remove employee advances | ✓ | – |
@@ -346,7 +347,7 @@ All day boundaries, reports and bill dates use the salon's timezone, `Asia/Kolka
 
 ```bash
 npm run db:start      # the database must be running
-npm test              # 160 tests across 15 files
+npm test              # 183 tests across 17 files
 
 npm run dev           # then, in another terminal, against a seeded database:
 npm run test:http     # redirects, forged cookies, owner-only routes

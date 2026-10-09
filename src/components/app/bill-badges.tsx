@@ -1,6 +1,7 @@
 import { Banknote, CreditCard, Smartphone } from "lucide-react";
 import type { BillStatus, PaymentMethod } from "@/generated/prisma/enums";
 import { formatMoney } from "@/lib/format";
+import { fromPaise, toPaise } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
 export const PAYMENT_LABEL: Record<PaymentMethod, string> = { CASH: "Cash", UPI: "UPI", CARD: "Card" };
@@ -44,8 +45,26 @@ export function BillPaymentStatus({
       </span>
     );
   }
-  const method = bill.paymentMethod ?? bill.payments.at(-1)?.method;
+  // A split bill (half cash, half UPI) shows every method it was paid by.
+  const methods = [...new Set(bill.payments.map((p) => p.method))];
+  if (methods.length > 1) {
+    return (
+      <span className="inline-flex flex-wrap justify-end gap-1">
+        {methods.map((m) => (
+          <PaymentChip key={m} method={m} />
+        ))}
+      </span>
+    );
+  }
+  const method = bill.paymentMethod ?? methods[0];
   return method ? <PaymentChip method={method} /> : null;
+}
+
+/** What was received by each method, in Cash, UPI, Card order, for a bill's payments. */
+export function amountsByMethod(payments: { method: PaymentMethod; amount: string }[]) {
+  return (Object.keys(PAYMENT_LABEL) as PaymentMethod[])
+    .map((method) => ({ method, amount: fromPaise(payments.filter((p) => p.method === method).reduce((n, p) => n + toPaise(p.amount), 0)) }))
+    .filter((p) => toPaise(p.amount) > 0);
 }
 
 /** "Cash + UPI" for the methods used across a bill's payments. */

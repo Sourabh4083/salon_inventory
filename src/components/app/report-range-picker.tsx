@@ -16,13 +16,13 @@ const PRESETS: { key: RangeKey; label: string }[] = [
   { key: "month", label: "This month" },
 ];
 
-export function ReportRangePicker({ active, from, to }: { active: RangeKey; from: string; to: string }) {
+export function ReportRangePicker({ active, from, to, view }: { active: RangeKey; from: string; to: string; view?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const [pending, start] = useTransition();
   const [custom, setCustom] = useState({ from, to });
 
-  const go = (qs: string) => start(() => router.replace(`${pathname}?${qs}`, { scroll: false }));
+  const go = (qs: string) => start(() => router.replace(`${pathname}?${qs}${view ? `&view=${view}` : ""}`, { scroll: false }));
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border bg-card p-3 shadow-xs sm:flex-row sm:items-center sm:justify-between">

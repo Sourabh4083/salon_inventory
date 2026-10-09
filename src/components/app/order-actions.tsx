@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
+import { NativeSelect } from "@/components/app/native-select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -26,6 +27,21 @@ import {
 } from "@/components/ui/alert-dialog";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+type Method = "CASH" | "UPI" | "CARD";
+
+/** How the shop paid for what arrived, so its cost comes off the right balance. */
+function PaidBy({ id, value, onChange }: { id: string; value: Method; onChange: (m: Method) => void }) {
+  return (
+    <Field label="Paid by" htmlFor={id}>
+      <NativeSelect id={id} className="h-11" value={value} onChange={(e) => onChange(e.target.value as Method)}>
+        <option value="CASH">Cash</option>
+        <option value="UPI">UPI</option>
+        <option value="CARD">Card / bank</option>
+      </NativeSelect>
+    </Field>
+  );
+}
 
 /**
  * The buttons on an active order: "Received" (everything arrived), "Some products
@@ -85,11 +101,12 @@ function receivedToast(before: OrderDTO, after: OrderDTO) {
 
 function ReceiveAllDialog({ order, open, onOpenChange }: { order: OrderDTO; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [pending, start] = useTransition();
+  const [method, setMethod] = useState<Method>("CASH");
   const lines = order.items.filter((i) => i.pending > 0 && i.productId);
 
   const confirm = () =>
     start(async () => {
-      const res = await receiveOrderAction({ orderId: order.id, lines: "ALL" });
+      const res = await receiveOrderAction({ orderId: order.id, lines: "ALL", paymentMethod: method });
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -115,6 +132,7 @@ function ReceiveAllDialog({ order, open, onOpenChange }: { order: OrderDTO; open
             </li>
           ))}
         </ul>
+        <PaidBy id={`paid-all-${order.id}`} value={method} onChange={setMethod} />
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Not yet</AlertDialogCancel>
           <AlertDialogAction onClick={confirm} disabled={pending}>
@@ -146,6 +164,7 @@ function ReceivePartialDialog({ order, open, onOpenChange }: { order: OrderDTO; 
 function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
   const lines = order.items.filter((i) => i.pending > 0 && i.productId);
   const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(lines.map((i) => [i.id, String(i.pending)])));
+  const [method, setMethod] = useState<Method>("CASH");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -159,7 +178,7 @@ function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
     if (over) return setError(`Only ${over.item.pending} of “${over.item.name}” are pending.`);
     if (total === 0) return setError("Enter the quantity that arrived for at least one product.");
     start(async () => {
-      const res = await receiveOrderAction({ orderId: order.id, lines: parsed.map((p) => ({ itemId: p.item.id, quantity: p.n })) });
+      const res = await receiveOrderAction({ orderId: order.id, lines: parsed.map((p) => ({ itemId: p.item.id, quantity: p.n })), paymentMethod: method });
       if (!res.ok) return setError(res.error);
       receivedToast(order, res.data);
       close();
@@ -195,6 +214,7 @@ function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
           </li>
         ))}
       </ul>
+      <PaidBy id={`paid-part-${order.id}`} value={method} onChange={setMethod} />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <DialogFooter>
         <Button type="button" variant="outline" size="lg" className="h-11" onClick={close} disabled={pending}>

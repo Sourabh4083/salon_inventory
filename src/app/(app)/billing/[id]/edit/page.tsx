@@ -34,10 +34,12 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
     (await prisma.product.findMany({ where: { id: { in: Object.keys(originalQty) } }, select: { id: true, quantity: true } })).map((p) => [p.id, p.quantity]),
   );
 
-  const counter = bill.payments.find((p) => p.atBilling);
+  const counter = bill.payments.filter((p) => p.atBilling);
+  const counterPaid = counter.reduce((n, p) => n + toPaise(p.amount), 0);
   const collectedLater = bill.payments.filter((p) => !p.atBilling).reduce((n, p) => n + toPaise(p.amount), 0);
   // Anything short of the full total at the counter was a pay-later bill.
-  const payLater = Number(bill.total) > 0 && (!counter || counter.amount !== bill.total);
+  const payLater = Number(bill.total) > 0 && counterPaid !== toPaise(bill.total);
+  const part = (method: "CASH" | "UPI" | "CARD") => trimMoney(counter.find((p) => p.method === method)?.amount ?? "");
 
   const edit: BillEditInit = {
     billId: bill.id,
@@ -46,9 +48,10 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
     customerName: bill.customerName ?? "",
     customerPhone: bill.customerPhone ?? "",
     discount: Number(bill.discount) > 0 ? trimMoney(bill.discount) : "",
-    paymentMethod: counter?.method ?? bill.paymentMethod ?? "CASH",
+    paymentMethod: counter[0]?.method ?? bill.paymentMethod ?? "CASH",
     payLater,
-    paidNow: payLater && counter ? trimMoney(counter.amount) : "",
+    paidNow: payLater && counter.length === 1 ? trimMoney(counter[0].amount) : "",
+    split: counter.length > 1 ? { CASH: part("CASH"), UPI: part("UPI"), CARD: part("CARD") } : null,
     collectedLater: collectedLater > 0 ? fromPaise(collectedLater) : null,
     notes: bill.notes ?? "",
     originalQty,
