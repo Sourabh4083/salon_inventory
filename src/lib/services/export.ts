@@ -4,7 +4,9 @@ import { prisma } from "@/lib/db";
 import type { BillStatus, MovementType } from "@/generated/prisma/enums";
 import type { SessionUser } from "@/lib/auth/session";
 import { listProducts, type ProductSort } from "@/lib/services/products";
-import { listBills, getSalesReport } from "@/lib/services/billing";
+import { listBills } from "@/lib/services/billing";
+import { getProfitReport } from "@/lib/services/profit";
+import { getMoneyMovement, listMoneyEntries, type AccountMovement } from "@/lib/services/cashbook";
 import { listMovements } from "@/lib/services/inventory";
 import { listExpenses } from "@/lib/services/expenses";
 import { getPurchaseReport } from "@/lib/services/orders";
@@ -140,12 +142,15 @@ async function billsSheets(p: Params): Promise<Sheet[]> {
 
 async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
   const range = resolveRange(p);
-  const [report, expenses, purchases] = await Promise.all([
-    getSalesReport(range),
+  const [profit, expenses, purchases, movement, passbook] = await Promise.all([
+    getProfitReport(range),
     collect((page) => listExpenses({ from: range.from, to: range.to, page, pageSize: 100 }, actor)),
     getPurchaseReport(range),
+    getMoneyMovement(range),
+    listMoneyEntries(range, 5000),
   ]);
-  const expenseTotal = expenses.reduce((n, e) => n + toPaise(e.amount), 0);
+  const { report } = profit;
+  const moneyLine = (label: string, key: keyof AccountMovement) => ({ Figure: label, Cash: Number(movement.cash[key]), Bank: Number(movement.bank[key]), Total: Number(movement.total[key]) });
   return [
     {
       name: "Summary",
@@ -158,21 +163,39 @@ async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]
         { Figure: "Product sales", Value: Number(report.productRevenue) },
         { Figure: "Service sales", Value: Number(report.serviceRevenue) },
         { Figure: "Discounts given", Value: Number(report.discount) },
-        { Figure: "Product cost", Value: Number(report.cost) },
-        { Figure: "Gross profit (products)", Value: Number(report.grossProfit) },
         { Figure: "Units sold", Value: report.unitsSold },
-        { Figure: "Expenses", Value: Number(fromPaise(expenseTotal)) },
-        { Figure: "Sales − expenses", Value: Number(fromPaise(toPaise(report.revenue) - expenseTotal)) },
+        { Figure: "Product cost", Value: Number(profit.productCost) },
+        { Figure: "Shop expenses", Value: Number(profit.expenses) },
+        { Figure: "Staff pay", Value: Number(profit.staffPay) },
+        { Figure: "Money spent", Value: Number(profit.spent) },
+        { Figure: "Profit (sales − money spent)", Value: Number(profit.profit) },
+        { Figure: "Total received", Value: Number(profit.received) },
         { Figure: "Still to collect (unpaid bills)", Value: Number(report.toCollect) },
         { Figure: "Product purchases (received)", Value: Number(purchases.total) },
         { Figure: "Units received from orders", Value: purchases.units },
       ],
+    },
+    {
+      name: "Money in and out",
+      rows: [
+        moneyLine("Received from customers", "received"),
+        moneyLine("Shop expenses", "expenses"),
+        moneyLine("Salary paid", "salary"),
+        moneyLine("Advances given", "advances"),
+        moneyLine("Stock bought", "stock"),
+        moneyLine("Change (received − paid out)", "change"),
+      ],
+    },
+    {
+      name: "Passbook",
+      rows: passbook.items.map((e) => ({ Date: formatDate(e.date), Entry: e.label, "Paid by": e.method, Account: e.account === "cash" ? "Cash" : "Bank", Amount: Number(e.amount) })),
     },
     { name: "By day", rows: report.byDay.map((d) => ({ Date: formatDate(d.date), Bills: d.billCount, Sales: Number(d.amount) })) },
     { name: "Payments received", rows: report.byPayment.map((x) => ({ Method: x.method, Payments: x.count, Amount: Number(x.amount) })) },
     { name: "Top products", rows: report.topProducts.map((x) => ({ Product: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
     { name: "Top services", rows: report.topServices.map((x) => ({ Service: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
     { name: "Expenses", rows: expenses.map(expenseRow) },
+    { name: "Staff pay", rows: profit.staff.map((s) => ({ Employee: s.name, Days: s.days, "Days cut": s.cutDays, Amount: Number(s.amount) })) },
     {
       name: "Product purchases",
       rows: purchases.orders.map((o) => ({ Order: o.orderNumber, "Last received": formatDate(o.lastReceivedAt), Units: o.units, Amount: Number(o.amount) })),
@@ -245,7 +268,7 @@ async function salariesSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
     },
     {
       name: "Advances",
-      rows: advances.map((a) => ({ Date: formatDate(a.takenOn), Employee: a.employee.name, Amount: Number(a.amount), Note: a.note, "Noted by": a.createdBy.name })),
+      rows: advances.map((a) => ({ Date: formatDate(a.takenOn), Employee: a.employee.name, Amount: Number(a.amount), "Paid by": a.paymentMethod, Note: a.note, "Noted by": a.createdBy.name })),
     },
     {
       name: "Salary payments",

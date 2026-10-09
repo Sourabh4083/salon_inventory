@@ -40,12 +40,22 @@ export function ProductForm({
   product,
   isOwner,
   globalThreshold,
+  defaultName,
+  hideStartingStock,
+  onSaved,
+  onCancel,
 }: {
   categories: Category[];
   currencySymbol: string;
   product?: ProductDTO;
   isOwner: boolean;
   globalThreshold: number;
+  defaultName?: string;
+  /** For a product that is only being ordered: it starts at 0 and arrives with the order. */
+  hideStartingStock?: boolean;
+  /** Set when the form sits in a dialog: called with the saved product instead of opening its page. */
+  onSaved?: (product: ProductDTO) => void;
+  onCancel?: () => void;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -55,7 +65,7 @@ export function ProductForm({
 
   const form = useForm<FormValues>({
     defaultValues: {
-      name: product?.name ?? "",
+      name: product?.name ?? defaultName ?? "",
       categoryId: product?.categoryId ?? categories[0]?.id ?? "",
       sellingPrice: product?.sellingPrice ?? "",
       costPrice: product?.costPrice ?? "",
@@ -100,7 +110,8 @@ export function ProductForm({
         return;
       }
       toast.success(editing ? "Product updated" : "Product saved", { description: `${res.data.name} · Stock ${res.data.quantity}` });
-      router.push(`/inventory/${res.data.id}`);
+      if (onSaved) onSaved(res.data);
+      else router.push(`/inventory/${res.data.id}`);
     });
   };
 
@@ -169,7 +180,7 @@ export function ProductForm({
         </div>
       </section>
 
-      {!editing ? (
+      {!editing && !hideStartingStock ? (
         <section className="rounded-2xl border bg-card p-4 shadow-xs sm:p-6">
           <h2 className="font-heading text-lg">Starting stock</h2>
           <p className="mt-1 text-sm text-muted-foreground">
@@ -201,8 +212,8 @@ export function ProductForm({
         </p>
       ) : null}
 
-      <div className="sticky bottom-0 -mx-4 flex gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0">
-        <Button type="button" variant="outline" size="lg" className="h-11 flex-1 sm:flex-none" onClick={() => router.back()} disabled={pending}>
+      <div className={onSaved ? "flex gap-2" : "sticky bottom-0 -mx-4 flex gap-2 border-t bg-background/95 px-4 py-3 backdrop-blur sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0"}>
+        <Button type="button" variant="outline" size="lg" className="h-11 flex-1 sm:flex-none" onClick={() => (onCancel ? onCancel() : router.back())} disabled={pending}>
           Cancel
         </Button>
         <Button type="submit" size="lg" className="h-11 flex-1 sm:flex-none" disabled={pending}>

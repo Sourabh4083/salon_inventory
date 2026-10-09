@@ -24,6 +24,7 @@ export type Permission =
   | "employee.manage"
   | "order.view"
   | "order.receive"
+  | "order.create"
   | "order.manage"
   | "employee.view"
   | "advance.record"
@@ -49,6 +50,9 @@ const MANAGER_PERMISSIONS: Permission[] = [
   // Deliveries arrive while the manager runs the shop, so they can book them in.
   "order.view",
   "order.receive",
+  // The manager sees what is running out, so they can place the order too. They
+  // never see or type a cost; editing and closing an order stay with the owner.
+  "order.create",
   // Staff take cash advances during the day; the manager notes them against the
   // employee (basic details only) and records the shop's small daily expenses.
   // Noting is all: the advances already taken, salaries and pay cuts are owner-only.

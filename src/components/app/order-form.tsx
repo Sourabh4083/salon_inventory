@@ -13,6 +13,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Field } from "@/components/app/field";
 import { ProductPickerDialog } from "@/components/app/product-picker-dialog";
+import { ProductForm } from "@/components/app/product-form";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 export type OrderFormLine = {
   productId: string;
@@ -24,9 +26,19 @@ export type OrderFormLine = {
 
 export function OrderForm({
   currencySymbol,
+  categories,
+  globalThreshold,
+  isOwner,
+  showCost,
   initial,
 }: {
   currencySymbol: string;
+  /** For adding a product that isn't in the inventory yet, right from the order. */
+  categories: { id: string; name: string }[];
+  globalThreshold: number;
+  isOwner: boolean;
+  /** Costs are owner-only; the manager orders by product and quantity alone. */
+  showCost: boolean;
   /** Present when editing an existing order. */
   initial?: { orderId: string; orderNumber: string; notes: string; lines: OrderFormLine[] };
 }) {
@@ -34,6 +46,8 @@ export function OrderForm({
   const [lines, setLines] = useState<OrderFormLine[]>(initial?.lines ?? []);
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [pickerOpen, setPickerOpen] = useState(false);
+  // null = closed; otherwise the name typed in the picker's search box.
+  const [newProductName, setNewProductName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -59,7 +73,7 @@ export function OrderForm({
     setError(null);
     if (!lines.length) return setError("Add at least one product.");
     start(async () => {
-      const payload = { items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: l.unitCost })), notes };
+      const payload = { items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: showCost ? l.unitCost : "" })), notes };
       const res = initial ? await updateOrderAction(initial.orderId, payload) : await createOrderAction(payload);
       if (!res.ok) {
         setError(res.error);
@@ -85,7 +99,7 @@ export function OrderForm({
 
         {lines.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted-foreground">
-            No products yet. Click “Add product” — out-of-stock and low-stock products are listed first.
+            No products yet. Click “Add product” — out-of-stock and low-stock products are listed first, and you can add a new product from there too.
           </p>
         ) : (
           <ul className="divide-y">
@@ -114,17 +128,19 @@ export function OrderForm({
                       <Plus className="size-4" />
                     </button>
                   </div>
-                  <div className="relative w-28">
-                    <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
-                    <Input
-                      inputMode="decimal"
-                      value={l.unitCost}
-                      onChange={(e) => update(l.productId, { unitCost: e.target.value })}
-                      placeholder="Cost"
-                      className="h-10 pl-7 tabular-nums"
-                      aria-label={`Cost per unit of ${l.name}`}
-                    />
-                  </div>
+                  {showCost ? (
+                    <div className="relative w-28">
+                      <span className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-sm text-muted-foreground">{currencySymbol}</span>
+                      <Input
+                        inputMode="decimal"
+                        value={l.unitCost}
+                        onChange={(e) => update(l.productId, { unitCost: e.target.value })}
+                        placeholder="Cost"
+                        className="h-10 pl-7 tabular-nums"
+                        aria-label={`Cost per unit of ${l.name}`}
+                      />
+                    </div>
+                  ) : null}
                   <button type="button" onClick={() => remove(l.productId)} className="flex size-10 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-destructive" aria-label={`Remove ${l.name}`}>
                     <Trash2 className="size-4" />
                   </button>
@@ -144,7 +160,7 @@ export function OrderForm({
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">
           {lines.length} {lines.length === 1 ? "product" : "products"} · {totals.units} {totals.units === 1 ? "unit" : "units"}
-          {totals.cost > 0 ? ` · about ${formatMoney(fromPaise(totals.cost), currencySymbol)}` : ""}
+          {showCost && totals.cost > 0 ?` · about ${formatMoney(fromPaise(totals.cost), currencySymbol)}` : ""}
         </p>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -166,7 +182,37 @@ export function OrderForm({
           addProduct(p);
           setPickerOpen(false);
         }}
+        onCreateNew={(name) => {
+          setPickerOpen(false);
+          setNewProductName(name);
+        }}
       />
+
+      <Dialog open={newProductName !== null} onOpenChange={(open) => (open ? null : setNewProductName(null))}>
+        <DialogContent className="flex max-h-[85dvh] flex-col sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-xl">Add new product</DialogTitle>
+            <DialogDescription>It is saved in the inventory with 0 stock and added to this order. Stock goes up when the order is received.</DialogDescription>
+          </DialogHeader>
+          {newProductName !== null ? (
+            <div className="-mx-1 min-h-0 flex-1 overflow-y-auto px-1">
+              <ProductForm
+                categories={categories}
+                currencySymbol={currencySymbol}
+                isOwner={isOwner}
+                globalThreshold={globalThreshold}
+                defaultName={newProductName}
+                hideStartingStock
+                onCancel={() => setNewProductName(null)}
+                onSaved={(p) => {
+                  addProduct(p);
+                  setNewProductName(null);
+                }}
+              />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

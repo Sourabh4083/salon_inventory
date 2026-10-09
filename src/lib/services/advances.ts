@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
+import type { PaymentMethod } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import { can } from "@/lib/permissions";
 import { recordAudit } from "@/lib/services/audit";
@@ -19,6 +20,7 @@ export type AdvanceDTO = {
   employeeId: string;
   amount: string;
   takenOn: string;
+  paymentMethod: PaymentMethod;
   note: string | null;
   createdAt: string;
   createdByName: string;
@@ -41,6 +43,7 @@ function toAdvanceDTO(a: AdvanceRow, actor: SessionUser): AdvanceDTO {
     employeeId: a.employeeId,
     amount: a.amount.toString(),
     takenOn: a.takenOn.toISOString(),
+    paymentMethod: a.paymentMethod,
     note: a.note,
     createdAt: a.createdAt.toISOString(),
     createdByName: a.createdBy.name,
@@ -108,14 +111,14 @@ export async function recordAdvance(input: AdvanceData, actor: SessionUser): Pro
     if (!employee) throw new AppError("Employee not found.", "NOT_FOUND");
     if (!employee.isActive && actor.role !== "OWNER") throw new AppError("This employee has left the shop.");
     const advance = await tx.employeeAdvance.create({
-      data: { employeeId: input.employeeId, amount: input.amount, takenOn, note: input.note, createdById: actor.id },
+      data: { employeeId: input.employeeId, amount: input.amount, takenOn, paymentMethod: input.paymentMethod, note: input.note, createdById: actor.id },
       include: advanceInclude,
     });
     await recordAudit(tx, {
       action: "ADVANCE_RECORDED",
       entityType: "Employee",
       entityId: input.employeeId,
-      summary: `Advance ${input.amount} given to "${employee.name}"${input.note ? ` (${input.note})` : ""}`,
+      summary: `Advance ${input.amount} given to "${employee.name}" by ${input.paymentMethod}${input.note ? ` (${input.note})` : ""}`,
       metadata: { advanceId: advance.id, amount: input.amount, takenOn: takenOn.toISOString() },
       actorId: actor.id,
     });

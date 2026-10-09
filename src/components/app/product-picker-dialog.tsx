@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { LoaderCircle, Search } from "lucide-react";
+import { LoaderCircle, Plus, Search } from "lucide-react";
 import { quickSearchProductsAction } from "@/app/actions/products";
 import type { ActionResult } from "@/lib/errors";
 import type { ProductDTO } from "@/lib/services/products";
 import { formatMoney } from "@/lib/format";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StockBadge } from "@/components/app/stock-badge";
 
@@ -20,6 +21,8 @@ type PickerProps = {
   disableOutOfStock?: boolean;
   /** Where results come from; defaults to the general product search. */
   search?: (query: string) => Promise<ActionResult<ProductDTO[]>>;
+  /** Shows an "Add new product" button; gets whatever was typed in the search box. */
+  onCreateNew?: (query: string) => void;
 };
 
 /**
@@ -41,7 +44,7 @@ export function ProductPickerDialog({ open, onOpenChange, title, description, ..
   );
 }
 
-function PickerBody({ currencySymbol, onPick, disableOutOfStock, search = quickSearchProductsAction }: Pick<PickerProps, "currencySymbol" | "onPick" | "disableOutOfStock" | "search">) {
+function PickerBody({ currencySymbol, onPick, disableOutOfStock, search = quickSearchProductsAction, onCreateNew }: Pick<PickerProps, "currencySymbol" | "onPick" | "disableOutOfStock" | "search" | "onCreateNew">) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ProductDTO[] | null>(null);
   const seq = useRef(0);
@@ -115,6 +118,11 @@ function PickerBody({ currencySymbol, onPick, disableOutOfStock, search = quickS
           })
         )}
       </ul>
+      {onCreateNew ? (
+        <Button type="button" variant="outline" size="lg" className="h-11" onClick={() => onCreateNew(query.trim())}>
+          <Plus /> Not in the list? Add new product
+        </Button>
+      ) : null}
     </>
   );
 }

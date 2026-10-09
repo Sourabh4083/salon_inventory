@@ -12,6 +12,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Field } from "@/components/app/field";
+import { NativeSelect } from "@/components/app/native-select";
+import { PaymentChip } from "@/components/app/bill-badges";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -117,6 +119,7 @@ export function EmployeeAdvances({
                   {month ? formatDate(a.takenOn) : formatDateTime(a.createdAt)} · noted by {a.createdByName}
                 </p>
               </div>
+              <PaymentChip method={a.paymentMethod} />
               <p className="shrink-0 text-base font-semibold tabular-nums">{formatMoney(a.amount, currencySymbol)}</p>
               {a.canDelete ? (
                 <Button size="icon-sm" variant="ghost" className="shrink-0 text-muted-foreground hover:text-destructive" aria-label="Remove entry" onClick={() => setToDelete(a)}>
@@ -182,6 +185,7 @@ function AdvanceForm({
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [takenOn, setTakenOn] = useState(toDateParam(new Date()));
+  const [method, setMethod] = useState<"CASH" | "UPI" | "CARD">("CASH");
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -191,7 +195,7 @@ function AdvanceForm({
     setFieldErr({});
     setError(null);
     start(async () => {
-      const res = await recordAdvanceAction({ employeeId, amount, note, takenOn: isOwner ? takenOn : undefined });
+      const res = await recordAdvanceAction({ employeeId, amount, note, paymentMethod: method, takenOn: isOwner ? takenOn : undefined });
       if (!res.ok) {
         setFieldErr(res.fieldErrors ?? {});
         setError(res.fieldErrors ? null : res.error);
@@ -207,6 +211,13 @@ function AdvanceForm({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <Field label={`Amount (${currencySymbol})`} htmlFor={`${id}-amount`} required error={fieldErr.amount}>
           <Input id={`${id}-amount`} className="h-11 text-base" inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 500" autoFocus aria-invalid={Boolean(fieldErr.amount)} />
+        </Field>
+        <Field label="Paid by" htmlFor={`${id}-method`}>
+          <NativeSelect id={`${id}-method`} className="h-11" value={method} onChange={(e) => setMethod(e.target.value as typeof method)}>
+            <option value="CASH">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="CARD">Card / bank</option>
+          </NativeSelect>
         </Field>
         {isOwner ? (
           <Field label="Date" htmlFor={`${id}-date`} error={fieldErr.takenOn}>

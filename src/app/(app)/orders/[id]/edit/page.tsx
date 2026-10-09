@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getOrder } from "@/lib/services/orders";
+import { listCategories } from "@/lib/services/products";
 import { PageHeader } from "@/components/app/page-header";
 import { OrderForm } from "@/components/app/order-form";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ export const metadata: Metadata = { title: "Edit Order" };
 export default async function EditOrderPage({ params }: { params: Promise<{ id: string }> }) {
   await requirePermissionPage("order.manage");
   const { id } = await params;
-  const [settings, order] = await Promise.all([getSettings(), getOrder(id)]);
+  const [settings, order, categories] = await Promise.all([getSettings(), getOrder(id), listCategories()]);
   if (!order) notFound();
   // Once anything has been booked in, the order is history and can only be closed.
   if (order.status !== "ACTIVE" || order.totalReceived > 0) redirect(`/orders/${id}`);
@@ -30,6 +31,11 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
       </div>
       <OrderForm
         currencySymbol={settings.currencySymbol}
+        categories={categories}
+        globalThreshold={settings.lowStockThreshold}
+        // Editing an order is owner-only (order.manage above).
+        isOwner
+        showCost
         initial={{
           orderId: order.id,
           orderNumber: order.orderNumber,

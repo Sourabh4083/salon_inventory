@@ -170,11 +170,14 @@ async function buildLines(tx: Prisma.TransactionClient, items: OrderCreateData["
 
 /* ---------- Create / edit ---------- */
 
-/** Owner only. Places the order; stock does not change until products are received. */
+/**
+ * Places the order; stock does not change until products are received. Costs are
+ * owner-only: a manager's order takes each product's saved cost price instead.
+ */
 export async function createOrder(data: OrderCreateData, actor: SessionUser): Promise<OrderDetailDTO> {
-  requireOwner(actor, "place orders");
+  const items = actor.role === "OWNER" ? data.items : data.items.map((i) => ({ ...i, unitCost: null }));
   const orderId = await prisma.$transaction(async (tx) => {
-    const lines = await buildLines(tx, data.items);
+    const lines = await buildLines(tx, items);
     const order = await tx.purchaseOrder.create({
       data: {
         orderNumber: await nextOrderNumber(tx),
@@ -278,7 +281,9 @@ export async function receiveOrder(input: OrderReceiveData, actor: SessionUser):
         type: "STOCK_IN",
         previousQuantity: product.quantity,
         newQuantity: product.quantity + quantity,
-        unitCost: item.unitCost?.toFixed(2) ?? null,
+        // A line ordered before the product had a cost uses the cost price set since.
+        unitCost: item.unitCost?.toFixed(2) ?? product.costPrice,
+        paymentMethod: input.paymentMethod,
         note: `Received on ${order.orderNumber}`,
         actorId: actor.id,
         purchaseOrderId: order.id,

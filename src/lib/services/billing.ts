@@ -131,13 +131,30 @@ async function lockBill(tx: Prisma.TransactionClient, billId: string) {
   await tx.$queryRaw`SELECT id FROM "Bill" WHERE id = ${billId} FOR UPDATE`;
 }
 
-/** Paise taken at the counter: the whole total, or what a pay-later customer paid now. */
-function counterPaise(data: { payLater: boolean; paidNow: string }, total: number) {
-  if (!data.payLater) return total;
-  const paid = toPaise(data.paidNow);
+const METHODS: PaymentMethod[] = ["CASH", "UPI", "CARD"];
+
+type CounterInput = Pick<BillCreateData, "payLater" | "paidNow" | "paymentMethod" | "split">;
+
+/**
+ * Money taken at the counter, one part per method: the whole total, or what a pay-later
+ * customer paid now. A split bill lists its own parts, which must add up to that.
+ */
+function counterParts(data: CounterInput, total: number): { method: PaymentMethod; paise: number }[] {
+  if (data.split) {
+    const split = data.split;
+    const parts = METHODS.map((method) => ({ method, paise: toPaise(split[method]) })).filter((p) => p.paise > 0);
+    const sum = parts.reduce((n, p) => n + p.paise, 0);
+    if (sum > total) throw new AppError(data.payLater ? "Paid now cannot be more than the bill total." : `The split adds up to ${fromPaise(sum)}, but the bill total is ${fromPaise(total)}.`);
+    if (!data.payLater && sum < total) throw new AppError(`The split adds up to ${fromPaise(sum)}, but the bill total is ${fromPaise(total)}. ${fromPaise(total - sum)} is missing.`);
+    return parts;
+  }
+  const paid = data.payLater ? toPaise(data.paidNow) : total;
   if (paid > total) throw new AppError("Paid now cannot be more than the bill total.");
-  return paid;
+  return paid > 0 ? [{ method: data.paymentMethod, paise: paid }] : [];
 }
+
+/** "CASH 500.00 + UPI 500.00" for the audit log. */
+const partsLabel = (parts: { method: PaymentMethod; paise: number }[]) => (parts.length === 1 ? parts[0].method : parts.map((p) => `${p.method} ${fromPaise(p.paise)}`).join(" + "));
 
 function isToday(d: Date, now = new Date()) {
   return d >= startOfDay(now) && d <= endOfDay(now);
@@ -222,7 +239,8 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
     if (discount < 0) throw new AppError("Discount cannot be negative.");
     if (discount > subtotal) throw new AppError("Discount cannot be more than the bill subtotal.");
     const total = subtotal - discount;
-    const paid = counterPaise(data, total);
+    const parts = counterParts(data, total);
+    const paid = parts.reduce((n, p) => n + p.paise, 0);
     const now = new Date();
 
     const bill = await tx.bill.create({
@@ -233,13 +251,13 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
         subtotal: fromPaise(subtotal),
         discount: fromPaise(discount),
         total: fromPaise(total),
-        paymentMethod: paid > 0 ? data.paymentMethod : null,
+        paymentMethod: parts.length === 1 ? parts[0].method : null,
         balanceDue: fromPaise(total - paid),
         notes: data.notes,
         createdById: actor.id,
         createdAt: now,
         items: { createMany: { data: items } },
-        payments: paid > 0 ? { create: { amount: fromPaise(paid), method: data.paymentMethod, paidAt: now, atBilling: true, createdById: actor.id } } : undefined,
+        payments: { create: parts.map((p) => ({ amount: fromPaise(p.paise), method: p.method, paidAt: now, atBilling: true, createdById: actor.id })) },
       },
     });
 
@@ -265,7 +283,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
       entityType: "Bill",
       entityId: bill.id,
       summary: `Created ${bill.billNumber} for ${fromPaise(total)} (${items.length} line${items.length === 1 ? "" : "s"}, ${
-        paid === total ? data.paymentMethod : `pay later, ${fromPaise(total - paid)} due`
+        paid === total && parts.length ? partsLabel(parts) : `pay later, ${fromPaise(total - paid)} due`
       })`,
       actorId: actor.id,
     });
@@ -541,25 +559,26 @@ export async function updateBill(data: BillUpdateData, actor: SessionUser): Prom
 
     // Payments collected after billing stay as they were; the counter payment follows the form
     // (and the bill's date) only while nothing else has been collected.
-    const counter = bill.payments.find((p) => p.atBilling);
+    const counter = bill.payments.filter((p) => p.atBilling);
     const laterPaid = bill.payments.filter((p) => !p.atBilling).reduce((n, p) => n + toPaise(p.amount.toString()), 0);
     let paymentMethod = bill.paymentMethod;
     let balance: number;
     if (laterPaid > 0) {
-      const paid = laterPaid + (counter ? toPaise(counter.amount.toString()) : 0);
+      const paid = laterPaid + counter.reduce((n, p) => n + toPaise(p.amount.toString()), 0);
       if (total < paid) throw new AppError(`${fromPaise(paid)} has already been received on this bill, so the total can't be less than that.`);
       balance = total - paid;
-      if (counter) await tx.billPayment.update({ where: { id: counter.id }, data: { paidAt: data.billedAt } });
+      await tx.billPayment.updateMany({ where: { billId: bill.id, atBilling: true }, data: { paidAt: data.billedAt } });
     } else {
-      const paid = counterPaise(data, total);
-      balance = total - paid;
-      paymentMethod = paid > 0 ? data.paymentMethod : null;
-      if (counter) await tx.billPayment.delete({ where: { id: counter.id } });
-      if (paid > 0) {
-        await tx.billPayment.create({
-          data: { billId: bill.id, amount: fromPaise(paid), method: data.paymentMethod, paidAt: data.billedAt, atBilling: true, createdById: counter?.createdById ?? bill.createdById },
-        });
-      }
+      const parts = counterParts(data, total);
+      balance = total - parts.reduce((n, p) => n + p.paise, 0);
+      paymentMethod = parts.length === 1 ? parts[0].method : null;
+      await tx.billPayment.deleteMany({ where: { billId: bill.id, atBilling: true } });
+      const createdById = counter[0]?.createdById ?? bill.createdById;
+      // The cashbook counts an entry from the moment it was typed in, so keep that moment.
+      const createdAt = counter[0]?.createdAt;
+      await tx.billPayment.createMany({
+        data: parts.map((p) => ({ billId: bill.id, amount: fromPaise(p.paise), method: p.method, paidAt: data.billedAt, atBilling: true, createdById, createdAt })),
+      });
     }
 
     for (const id of productIds) {
@@ -697,6 +716,8 @@ export type SalesReport = {
   cost: string;
   grossProfit: string;
   unitsSold: number;
+  /** Units sold with no cost price known, which `cost` can't include. */
+  uncostedUnitsSold: number;
   /** Money actually received in the period (including dues collected on older bills), by method. */
   byPayment: { method: PaymentMethod; count: number; amount: string }[];
   /** Still owed on this period's bills. */
@@ -705,6 +726,8 @@ export type SalesReport = {
   byDay: { date: string; billCount: number; amount: string }[];
   topProducts: { productId: string | null; name: string; quantity: number; amount: string }[];
   topServices: { name: string; quantity: number; amount: string }[];
+  /** Every product sold, with what those units cost the shop. */
+  soldProducts: { productId: string | null; name: string; quantity: number; amount: string; cost: string }[];
 };
 
 export async function getSalesReport(range: { from: Date; to: Date }): Promise<SalesReport> {
@@ -743,18 +766,22 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
   let serviceRevenue = 0;
   let cost = 0;
   let unitsSold = 0;
-  const products = new Map<string, { productId: string | null; name: string; quantity: number; amount: number }>();
+  let uncostedUnitsSold = 0;
+  const products = new Map<string, { productId: string | null; name: string; quantity: number; amount: number; cost: number }>();
   const services = new Map<string, { name: string; quantity: number; amount: number }>();
   for (const i of itemRows) {
     const amount = toPaise(i.lineTotal.toString());
     if (i.kind === "PRODUCT") {
       productRevenue += amount;
       unitsSold += i.quantity;
-      if (i.unitCost) cost += toPaise(i.unitCost.toString()) * i.quantity;
+      const lineCost = i.unitCost ? toPaise(i.unitCost.toString()) * i.quantity : 0;
+      cost += lineCost;
+      if (!i.unitCost) uncostedUnitsSold += i.quantity;
       const key = i.productId ?? `name:${i.name}`;
-      const cur = products.get(key) ?? { productId: i.productId, name: i.name, quantity: 0, amount: 0 };
+      const cur = products.get(key) ?? { productId: i.productId, name: i.name, quantity: 0, amount: 0, cost: 0 };
       cur.quantity += i.quantity;
       cur.amount += amount;
+      cur.cost += lineCost;
       products.set(key, cur);
     } else {
       serviceRevenue += amount;
@@ -785,7 +812,8 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
     cost: fromPaise(cost),
     grossProfit: fromPaise(grossProfit),
     unitsSold,
-    byPayment: (["CASH", "UPI", "CARD"] as PaymentMethod[]).map((method) => {
+    uncostedUnitsSold,
+    byPayment:(["CASH", "UPI", "CARD"] as PaymentMethod[]).map((method) => {
       const r = byPaymentRows.find((x) => x.method === method);
       return { method, count: r?._count._all ?? 0, amount: fromPaise(toPaise(r?._sum.amount?.toString() ?? "0")) };
     }),
@@ -799,10 +827,11 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
     topProducts: [...products.values()]
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10)
-      .map((p) => ({ ...p, amount: fromPaise(p.amount) })),
+      .map((p) => ({ productId: p.productId, name: p.name, quantity: p.quantity, amount: fromPaise(p.amount) })),
     topServices: [...services.values()]
       .sort((a, b) => b.amount - a.amount)
       .slice(0, 10)
       .map((s) => ({ ...s, amount: fromPaise(s.amount) })),
+    soldProducts: [...products.values()].sort((a, b) => b.cost - a.cost).map((p) => ({ ...p, amount: fromPaise(p.amount), cost: fromPaise(p.cost) })),
   };
 }

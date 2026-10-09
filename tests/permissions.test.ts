@@ -9,7 +9,7 @@ describe("role permissions", () => {
   });
 
   it("manager can run daily inventory", () => {
-    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "bill.create", "bill.view", "order.view", "order.receive"] as const) {
+    for (const p of ["dashboard.view", "product.view", "product.create", "product.edit", "stock.sale", "stock.in", "bill.create", "bill.view", "order.view", "order.receive", "order.create"] as const) {
       expect(can("MANAGER", p)).toBe(true);
     }
   });

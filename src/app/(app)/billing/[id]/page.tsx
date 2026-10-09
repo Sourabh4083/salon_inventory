@@ -24,7 +24,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
   const bill = billForViewer(found, user.role);
   const original = bill.editedAt ? await getOriginalBillSummary(bill.id) : null;
   // A bill paid in full at the counter needs no payments section; the receipt says how it was paid.
-  const paidAtCounter = bill.payments.length === 1 && bill.payments[0].atBilling && bill.payments[0].amount === bill.total;
+  const paidAtCounter = bill.payments.length > 0 && bill.payments.every((p) => p.atBilling) && bill.amountPaid === bill.total;
   const showPayments = Number(bill.total) > 0 && !paidAtCounter;
 
   return (

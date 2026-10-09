@@ -21,7 +21,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
   const user = await requirePermissionPage("order.view");
   const params = await searchParams;
   const history = params.view === "history";
-  const canOrder = can(user.role, "order.manage");
+  const canOrder = can(user.role, "order.create");
   const [settings, activeCount, result] = await Promise.all([
     getSettings(),
     countActiveOrders(),
@@ -76,7 +76,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
           <EmptyState
             icon={Truck}
             title="Nothing on order"
-            description={canOrder ? "Create an order with the products you need. It waits here until they arrive." : "The owner hasn't placed any orders that are waiting for delivery."}
+            description={canOrder ? "Create an order with the products you need. It waits here until they arrive." : "No orders are waiting for delivery."}
             action={newOrderButton}
           />
         )

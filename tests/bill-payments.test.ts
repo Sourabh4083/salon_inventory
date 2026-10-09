@@ -71,6 +71,78 @@ describe("making bills", () => {
   });
 });
 
+describe("split bills", () => {
+  const methods = (bill: { payments: { amount: string; method: string; atBilling: boolean }[] }) => bill.payments.map((p) => [p.amount, p.method, p.atBilling]);
+
+  it("half cash, half UPI: one counter payment per method and nothing due", async () => {
+    const bill = await createBill(billCreateSchema.parse({ items: [haircut("1000")], split: { CASH: "500", UPI: "500", CARD: "" } }), manager);
+    expect(bill.balanceDue).toBe("0.00");
+    expect(bill.amountPaid).toBe("1000.00");
+    expect(bill.paymentMethod).toBeNull();
+    expect(methods(bill)).toEqual([
+      ["500.00", "CASH", true],
+      ["500.00", "UPI", true],
+    ]);
+    const audit = await prisma.auditLog.findFirst({ where: { action: "BILL_CREATED", entityId: bill.id } });
+    expect(audit?.summary).toMatch(/CASH 500.00 \+ UPI 500.00/);
+  });
+
+  it("a split with only one method filled is an ordinary bill", async () => {
+    const bill = await createBill(billCreateSchema.parse({ items: [haircut("300")], split: { CASH: "", UPI: "", CARD: "300" } }), manager);
+    expect(bill.paymentMethod).toBe("CARD");
+    expect(methods(bill)).toEqual([["300.00", "CARD", true]]);
+  });
+
+  it("the parts must add up to the total", async () => {
+    await expect(createBill(billCreateSchema.parse({ items: [haircut("1000")], split: { CASH: "500", UPI: "300", CARD: "" } }), manager)).rejects.toThrow(/200.00 is missing/);
+    await expect(createBill(billCreateSchema.parse({ items: [haircut("1000")], split: { CASH: "500", UPI: "600", CARD: "" } }), manager)).rejects.toThrow(/adds up to 1100.00/);
+  });
+
+  it("pay later with the part paid now split two ways", async () => {
+    const bill = await createBill(billCreateSchema.parse({ ...customer, items: [haircut("1000")], payLater: true, split: { CASH: "200", UPI: "", CARD: "300" } }), manager);
+    expect(bill.amountPaid).toBe("500.00");
+    expect(bill.balanceDue).toBe("500.00");
+    expect(methods(bill)).toEqual([
+      ["200.00", "CASH", true],
+      ["300.00", "CARD", true],
+    ]);
+    await expect(createBill(billCreateSchema.parse({ ...customer, items: [haircut("1000")], payLater: true, split: { CASH: "600", UPI: "600", CARD: "" } }), manager)).rejects.toThrow(
+      /more than the bill total/,
+    );
+  });
+
+  it("each part counts under its own method in the sales report", async () => {
+    const range = { from: startOfDayInZone(new Date()), to: endOfDayInZone(new Date()) };
+    const before = await getSalesReport(range);
+    await createBill(billCreateSchema.parse({ items: [haircut("900")], split: { CASH: "400", UPI: "500", CARD: "" } }), manager);
+    const after = await getSalesReport(range);
+    const method = (r: typeof after, m: string) => Number(r.byPayment.find((x) => x.method === m)!.amount);
+    expect(Number(after.revenue) - Number(before.revenue)).toBe(900);
+    expect(method(after, "CASH") - method(before, "CASH")).toBe(400);
+    expect(method(after, "UPI") - method(before, "UPI")).toBe(500);
+    expect(method(after, "CARD") - method(before, "CARD")).toBe(0);
+  });
+
+  it("the owner can edit a bill into a split and back", async () => {
+    const bill = await createBill(billCreateSchema.parse({ items: [haircut("800")], paymentMethod: "CASH" }), manager);
+    const base = { billId: bill.id, billedAt: localInput(new Date(bill.createdAt)), items: [haircut("800")] };
+
+    const split = await updateBill(billUpdateSchema.parse({ ...base, split: { CASH: "300", UPI: "500", CARD: "" } }), owner);
+    expect(split.balanceDue).toBe("0.00");
+    expect(split.paymentMethod).toBeNull();
+    expect(methods(split)).toEqual([
+      ["300.00", "CASH", true],
+      ["500.00", "UPI", true],
+    ]);
+
+    await expect(updateBill(billUpdateSchema.parse({ ...base, items: [haircut("900")], split: { CASH: "300", UPI: "500", CARD: "" } }), owner)).rejects.toThrow(/100.00 is missing/);
+
+    const single = await updateBill(billUpdateSchema.parse({ ...base, paymentMethod: "UPI" }), owner);
+    expect(single.paymentMethod).toBe("UPI");
+    expect(methods(single)).toEqual([["800.00", "UPI", true]]);
+  });
+});
+
 describe("collecting payments", () => {
   let billId = "";
 

@@ -12,6 +12,7 @@ export async function resetDatabase() {
   await prisma.attendance.deleteMany();
   await prisma.employeeAdvance.deleteMany();
   await prisma.expense.deleteMany();
+  await prisma.cashDeposit.deleteMany();
   await prisma.employeeDocument.deleteMany();
   await prisma.openBill.deleteMany();
   await prisma.employee.deleteMany();

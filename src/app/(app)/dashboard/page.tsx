@@ -1,15 +1,18 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Activity, AlertTriangle, ArrowRight, Boxes, Package, PackageX, Receipt, TrendingUp, Truck } from "lucide-react";
+import { Activity, AlertTriangle, ArrowRight, Banknote, Boxes, HandCoins, Landmark, Package, PackageX, PiggyBank, Receipt, Truck, Wallet } from "lucide-react";
 import { requireUserPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { getDashboardStats, listMovements } from "@/lib/services/inventory";
 import { listProducts, productsForViewer } from "@/lib/services/products";
-import { getSalesReport } from "@/lib/services/billing";
+import { getOutstanding } from "@/lib/services/billing";
+import { getProfitReport } from "@/lib/services/profit";
+import { getBalances } from "@/lib/services/cashbook";
 import { countActiveOrders } from "@/lib/services/orders";
 import { resolveRange } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/format";
+import { toPaise } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
 import { QuickActions } from "@/components/app/quick-actions";
 import { MovementList } from "@/components/app/movement-list";
@@ -28,23 +31,42 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const user = await requireUserPage();
   const showSales = can(user.role, "report.view");
   const showActivity = can(user.role, "stock.history.view");
-  const [{ denied }, settings, stats, low, out, recent, today, activeOrders] = await Promise.all([
+  const [{ denied }, settings, stats, low, out, recent, money, activeOrders] = await Promise.all([
     searchParams,
     getSettings(),
     getDashboardStats(),
     listProducts({ stockStatus: "LOW_STOCK", sort: "quantity", pageSize: 6 }),
     listProducts({ stockStatus: "OUT_OF_STOCK", sort: "updated", pageSize: 6 }),
     showActivity ? listMovements({ pageSize: 8 }) : null,
-    showSales ? getSalesReport(resolveRange({ range: "today" })) : null,
+    showSales ? Promise.all([getProfitReport(resolveRange({ range: "today" })), getProfitReport(resolveRange({ range: "month" })), getOutstanding(), getBalances()]) : null,
     can(user.role, "order.view") ? countActiveOrders() : 0,
   ]);
+  const sym = settings.currencySymbol;
 
-  const kpis = [
-    { label: "Total Products", value: stats.totalProducts, icon: Package, href: "/inventory", tone: "text-primary bg-primary/10" },
-    { label: "Units in Stock", value: stats.totalUnits, icon: Boxes, href: "/inventory", tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
-    { label: "Low Stock", value: stats.lowStockCount, icon: AlertTriangle, href: "/inventory/low-stock", tone: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" },
-    { label: "Out of Stock", value: stats.outOfStockCount, icon: PackageX, href: "/inventory/out-of-stock", tone: "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15" },
+  const stockKpis = [
+    { label: "Low Stock", value: formatNumber(stats.lowStockCount), icon: AlertTriangle, href: "/inventory/low-stock", tone: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" },
+    { label: "Out of Stock", value: formatNumber(stats.outOfStockCount), icon: PackageX, href: "/inventory/out-of-stock", tone: "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15" },
   ];
+  // The owner's tiles are about money; the manager sees no money, only stock counts.
+  const kpis = money
+    ? [
+        { label: "Cash in drawer", value: money[3] ? formatMoney(money[3].cash, sym) : "Set balance", icon: Banknote, href: "/reports?range=today&view=cash", tone: "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15" },
+        { label: "In bank · UPI and Card", value: money[3] ? formatMoney(money[3].bank, sym) : "Set balance", icon: Landmark, href: "/reports?range=today&view=cash", tone: "text-violet-700 dark:text-violet-300 bg-violet-100 dark:bg-violet-500/15" },
+        { label: `Still to collect · ${money[2].count} ${money[2].count === 1 ? "bill" : "bills"}`, value: formatMoney(money[2].amount, sym), icon: HandCoins, href: "/billing?status=UNPAID", tone: "text-orange-700 dark:text-orange-300 bg-orange-100 dark:bg-orange-500/15" },
+        { label: "Stock value", value: formatMoney(stats.stockValue, sym), icon: Boxes, href: "/pricing", tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
+        ...stockKpis,
+      ]
+    : [
+        { label: "Total Products", value: formatNumber(stats.totalProducts), icon: Package, href: "/inventory", tone: "text-primary bg-primary/10" },
+        { label: "Units in Stock", value: formatNumber(stats.totalUnits), icon: Boxes, href: "/inventory", tone: "text-sky-700 dark:text-sky-300 bg-sky-100 dark:bg-sky-500/15" },
+        ...stockKpis,
+      ];
+  const periods = money
+    ? [
+        { key: "today", title: "Today", p: money[0] },
+        { key: "month", title: "This month", p: money[1] },
+      ]
+    : [];
 
   return (
     <div className="space-y-6 lg:space-y-8">
@@ -76,32 +98,46 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         <QuickActions currencySymbol={settings.currencySymbol} />
       </section>
 
-      {today ? (
-        <section aria-label="Sales today" className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Link href="/reports?range=today" className="group flex items-center gap-4 rounded-2xl border bg-primary p-4 text-primary-foreground shadow-xs dark:border-primary/30 dark:bg-primary/15 dark:text-foreground transition-shadow hover:shadow-md sm:col-span-2 sm:p-5">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary-foreground/15 dark:bg-primary/20 dark:text-primary">
-              <Receipt className="size-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-sm opacity-80">Sales today</span>
-              <span className="block text-3xl font-semibold tabular-nums sm:text-4xl">{formatMoney(today.revenue, settings.currencySymbol)}</span>
-              <span className="block text-xs opacity-80">
-                {today.billCount} {today.billCount === 1 ? "bill" : "bills"} · products {formatMoney(today.productRevenue, settings.currencySymbol)} · services {formatMoney(today.serviceRevenue, settings.currencySymbol)}
-              </span>
-            </span>
-            <ArrowRight className="size-5 opacity-0 transition-opacity group-hover:opacity-100" />
-          </Link>
-          <Link href="/reports?range=today" className="group rounded-2xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-md sm:p-5">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
-              <TrendingUp className="size-4.5" />
-            </span>
-            <p className="mt-3 text-3xl font-semibold tabular-nums">{formatMoney(today.grossProfit, settings.currencySymbol)}</p>
-            <p className="mt-0.5 text-sm text-muted-foreground">Gross profit today</p>
-          </Link>
-        </section>
-      ) : null}
+      {periods.map(({ key, title, p }) => {
+        const profitPositive = toPaise(p.profit) >= 0;
+        const cards = [
+          { view: "sales", label: "Sales", value: p.sales, sub: `${formatNumber(p.report.billCount)} ${p.report.billCount === 1 ? "bill" : "bills"}`, icon: Receipt, tone: "text-primary bg-primary/10" },
+          { view: "spent", label: "Money spent", value: p.spent, sub: "products, expenses, staff", icon: Wallet, tone: "text-amber-700 dark:text-amber-300 bg-amber-100 dark:bg-amber-500/15" },
+          {
+            view: "profit",
+            label: profitPositive ? "Profit" : "Loss",
+            value: p.profit,
+            sub: "sales − money spent",
+            icon: PiggyBank,
+            tone: profitPositive ? "text-emerald-700 dark:text-emerald-300 bg-emerald-100 dark:bg-emerald-500/15" : "text-red-700 dark:text-red-300 bg-red-100 dark:bg-red-500/15",
+          },
+        ];
+        return (
+          <section key={key} aria-labelledby={`money-${key}`} className="space-y-3">
+            <h2 id={`money-${key}`} className="font-heading text-lg">
+              {title}
+            </h2>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {cards.map((c) => (
+                <Link key={c.view} href={`/reports?range=${key}&view=${c.view}`} className="group rounded-2xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-md sm:p-5">
+                  <div className="flex items-center justify-between">
+                    <span className={cn("flex size-9 items-center justify-center rounded-xl", c.tone)}>
+                      <c.icon className="size-4.5" />
+                    </span>
+                    <ArrowRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                  </div>
+                  <p className="mt-3 text-2xl font-semibold tabular-nums sm:text-3xl">{formatMoney(c.value, sym)}</p>
+                  <p className="mt-0.5 text-sm text-muted-foreground">
+                    {c.label} · {c.sub}
+                  </p>
+                </Link>
+              ))}
+            </div>
+          </section>
+        );
+      })}
 
-      <section aria-label="Key figures" className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <section aria-label="Key figures" className={cn("grid grid-cols-2 gap-3", money ? "lg:grid-cols-3" : "lg:grid-cols-4")}>
         {kpis.map((k) => (
           <Link key={k.label} href={k.href} className="group rounded-2xl border bg-card p-4 shadow-xs transition-shadow hover:shadow-md sm:p-5">
             <div className="flex items-center justify-between">
@@ -110,7 +146,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </span>
               <ArrowRight className="size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
             </div>
-            <p className="mt-3 text-3xl font-semibold tabular-nums sm:text-4xl">{formatNumber(k.value)}</p>
+            <p className={cn("mt-3 font-semibold tabular-nums", money ? "text-2xl sm:text-3xl" : "text-3xl sm:text-4xl")}>{k.value}</p>
             <p className="mt-0.5 text-sm text-muted-foreground">{k.label}</p>
           </Link>
         ))}

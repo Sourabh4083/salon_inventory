@@ -1,6 +1,6 @@
 import type { BillDTO } from "@/lib/services/billing";
 import { formatDateTime, formatMoney } from "@/lib/format";
-import { paymentMethodsLabel } from "@/components/app/bill-badges";
+import { PAYMENT_LABEL, amountsByMethod, paymentMethodsLabel } from "@/components/app/bill-badges";
 import { cn } from "@/lib/utils";
 
 /**
@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 export function BillReceipt({ bill, businessName, currencySymbol, className }: { bill: BillDTO; businessName: string; currencySymbol: string; className?: string }) {
   const sym = currencySymbol;
   const due = bill.status === "COMPLETED" && Number(bill.balanceDue) > 0;
+  const byMethod = amountsByMethod(bill.payments);
   return (
     <article className={cn("receipt mx-auto w-full max-w-sm rounded-2xl border bg-card p-5 text-sm shadow-xs print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none", className)} aria-label={`Receipt ${bill.billNumber}`}>
       <header className="receipt-rule border-b-2 pb-3 text-center">
@@ -85,6 +86,13 @@ export function BillReceipt({ bill, businessName, currencySymbol, className }: {
               <span className="tabular-nums">{formatMoney(bill.balanceDue, sym)}</span>
             </div>
           </>
+        ) : byMethod.length > 1 ? (
+          byMethod.map((p) => (
+            <div key={p.method} className="flex justify-between">
+              <span className="text-muted-foreground">Paid by {PAYMENT_LABEL[p.method]}</span>
+              <span className="tabular-nums">{formatMoney(p.amount, sym)}</span>
+            </div>
+          ))
         ) : bill.payments.length ? (
           <div className="flex justify-between">
             <span className="text-muted-foreground">Paid by</span>
