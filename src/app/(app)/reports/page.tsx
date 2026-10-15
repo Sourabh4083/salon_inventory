@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Landmark, PiggyBank, Receipt, Wallet } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
-import { getSettings } from "@/lib/services/settings";
+import { getOwnerNames, getSettings } from "@/lib/services/settings";
 import { getProfitReport } from "@/lib/services/profit";
-import { getBalances, getMoneyMovement, listMoneyEntries } from "@/lib/services/cashbook";
+import { getBalances, getMoneyMovement, getOwnerWithdrawals, listMoneyEntries } from "@/lib/services/cashbook";
 import { listExpenses } from "@/lib/services/expenses";
 import { getPurchaseReport } from "@/lib/services/orders";
 import { DownloadExcelButton } from "@/components/app/download-excel-button";
@@ -31,7 +31,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
     getProfitReport(range),
     getBalances(),
     view === "spent" ? Promise.all([listExpenses({ from: range.from, to: range.to, pageSize: 100 }, user), getPurchaseReport(range)]) : null,
-    view === "cash" ? Promise.all([getMoneyMovement(range), listMoneyEntries(range)]) : null,
+    view === "cash" ? Promise.all([getMoneyMovement(range), listMoneyEntries(range), getOwnerWithdrawals(range), getOwnerNames()]) : null,
   ]);
   const sym = settings.currencySymbol;
   const money = (v: string) => formatMoney(v, sym);
@@ -94,7 +94,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
       {view === "sales" ? <SalesView p={p} sym={sym} billsHref={range.key === "custom" ? "/billing" : `/billing?range=${range.key}`} /> : null}
       {spentDetails ? <SpentView p={p} sym={sym} expenses={spentDetails[0]} purchases={spentDetails[1]} expensesHref={`/expenses?${rangeQuery}`} /> : null}
       {view === "profit" ? <ProfitView p={p} sym={sym} spentHref={hrefFor("spent")} /> : null}
-      {cashDetails ? <MoneyView balances={balances} movement={cashDetails[0]} entries={cashDetails[1]} sym={sym} rangeLabel={rangeLabel} /> : null}
+      {cashDetails ? <MoneyView balances={balances} movement={cashDetails[0]} entries={cashDetails[1]} taken={cashDetails[2]} ownerNames={cashDetails[3]} sym={sym} rangeLabel={rangeLabel} /> : null}
     </div>
   );
 }

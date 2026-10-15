@@ -6,7 +6,7 @@ import type { SessionUser } from "@/lib/auth/session";
 import { listProducts, type ProductSort } from "@/lib/services/products";
 import { listBills } from "@/lib/services/billing";
 import { getProfitReport } from "@/lib/services/profit";
-import { getMoneyMovement, listMoneyEntries, type AccountMovement } from "@/lib/services/cashbook";
+import { getMoneyMovement, getOwnerWithdrawals, listMoneyEntries, type AccountMovement } from "@/lib/services/cashbook";
 import { listMovements } from "@/lib/services/inventory";
 import { listExpenses } from "@/lib/services/expenses";
 import { getPurchaseReport } from "@/lib/services/orders";
@@ -142,12 +142,13 @@ async function billsSheets(p: Params): Promise<Sheet[]> {
 
 async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]> {
   const range = resolveRange(p);
-  const [profit, expenses, purchases, movement, passbook] = await Promise.all([
+  const [profit, expenses, purchases, movement, passbook, taken] = await Promise.all([
     getProfitReport(range),
     collect((page) => listExpenses({ from: range.from, to: range.to, page, pageSize: 100 }, actor)),
     getPurchaseReport(range),
     getMoneyMovement(range),
     listMoneyEntries(range, 5000),
+    getOwnerWithdrawals(range),
   ]);
   const { report } = profit;
   const moneyLine = (label: string, key: keyof AccountMovement) => ({ Figure: label, Cash: Number(movement.cash[key]), Bank: Number(movement.bank[key]), Total: Number(movement.total[key]) });
@@ -183,6 +184,7 @@ async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]
         moneyLine("Salary paid", "salary"),
         moneyLine("Advances given", "advances"),
         moneyLine("Stock bought", "stock"),
+        moneyLine("Taken by owners", "taken"),
         moneyLine("Change (received − paid out)", "change"),
       ],
     },
@@ -190,10 +192,17 @@ async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]
       name: "Passbook",
       rows: passbook.items.map((e) => ({ Date: formatDate(e.date), Entry: e.label, "Paid by": e.method, Account: e.account === "cash" ? "Cash" : "Bank", Amount: Number(e.amount) })),
     },
+    {
+      name: "Taken by owners",
+      rows: [
+        ...taken.byOwner.map((o) => ({ Owner: o.ownerName, Date: "Total", "Taken from": "", Note: "", Amount: Number(o.amount) })),
+        ...taken.items.map((t) => ({ Owner: t.ownerName, Date: formatDate(t.takenOn), "Taken from": t.paymentMethod, Note: t.note ?? "", Amount: Number(t.amount) })),
+      ],
+    },
     { name: "By day", rows: report.byDay.map((d) => ({ Date: formatDate(d.date), Bills: d.billCount, Sales: Number(d.amount) })) },
     { name: "Payments received", rows: report.byPayment.map((x) => ({ Method: x.method, Payments: x.count, Amount: Number(x.amount) })) },
-    { name: "Top products", rows: report.topProducts.map((x) => ({ Product: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
-    { name: "Top services", rows: report.topServices.map((x) => ({ Service: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
+    { name: "Products sold", rows: report.topProducts.map((x) => ({ Product: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
+    { name: "Services done", rows: report.topServices.map((x) => ({ Service: x.name, Quantity: x.quantity, Amount: Number(x.amount) })) },
     { name: "Expenses", rows: expenses.map(expenseRow) },
     { name: "Staff pay", rows: profit.staff.map((s) => ({ Employee: s.name, Days: s.days, "Days cut": s.cutDays, Amount: Number(s.amount) })) },
     {

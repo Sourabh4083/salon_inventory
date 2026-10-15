@@ -9,6 +9,9 @@ import type { OrderDTO } from "@/lib/services/orders";
 import type { Role } from "@/generated/prisma/enums";
 import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/format";
+import { fromPaise, toPaise, trimMoney } from "@/lib/money";
+import { GstInput } from "@/components/app/order-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
@@ -47,13 +50,26 @@ function PaidBy({ id, value, onChange }: { id: string; value: Method; onChange: 
  * The buttons on an active order: "Received" (everything arrived), "Some products
  * missing?" (enter what actually came) and, for the owner, Edit / Close order.
  */
-export function OrderActions({ order, role, className }: { order: OrderDTO; role: Role; className?: string }) {
+export function OrderActions({ order, role, currencySymbol, className }: { order: OrderDTO; role: Role; currencySymbol: string; className?: string }) {
   const [dialog, setDialog] = useState<"all" | "partial" | "close" | null>(null);
-  if (order.status !== "ACTIVE") return null;
+  const canManage = can(role, "order.manage");
+  // After a delivery only the amounts can be fixed (cost per unit, GST, note).
+  const editLabel = order.totalReceived > 0 ? "Fix amounts" : "Edit order";
+  if (order.status !== "ACTIVE") {
+    if (!canManage || order.totalReceived === 0) return null;
+    return (
+      <div className={cn("flex flex-wrap items-center gap-2", className)}>
+        <Button size="lg" variant="outline" className="h-11" render={<Link href={`/orders/${order.id}/edit`} />}>
+          <Pencil /> {editLabel}
+        </Button>
+      </div>
+    );
+  }
 
   const canReceive = can(role, "order.receive") && order.receivableLines > 0;
-  const canManage = can(role, "order.manage");
-  const canEdit = canManage && order.totalReceived === 0;
+  const canEdit = canManage;
+  // GST is owner-only and charged once, so it can be typed until the first delivery.
+  const gst = role === "OWNER" && !order.gstPaid ? { currencySymbol } : null;
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
@@ -75,7 +91,7 @@ export function OrderActions({ order, role, className }: { order: OrderDTO; role
           <DropdownMenuContent align="end">
             {canEdit ? (
               <DropdownMenuItem render={<Link href={`/orders/${order.id}/edit`} />}>
-                <Pencil /> Edit order
+                <Pencil /> {editLabel}
               </DropdownMenuItem>
             ) : null}
             <DropdownMenuItem variant="destructive" onClick={() => setDialog("close")}>
@@ -85,8 +101,8 @@ export function OrderActions({ order, role, className }: { order: OrderDTO; role
         </DropdownMenu>
       ) : null}
 
-      {canReceive ? <ReceiveAllDialog order={order} open={dialog === "all"} onOpenChange={(o) => setDialog(o ? "all" : null)} /> : null}
-      {canReceive ? <ReceivePartialDialog order={order} open={dialog === "partial"} onOpenChange={(o) => setDialog(o ? "partial" : null)} /> : null}
+      {canReceive ? <ReceiveAllDialog order={order} gst={gst} open={dialog === "all"} onOpenChange={(o) => setDialog(o ? "all" : null)} /> : null}
+      {canReceive ? <ReceivePartialDialog order={order} gst={gst} open={dialog === "partial"} onOpenChange={(o) => setDialog(o ? "partial" : null)} /> : null}
       {canManage ? <CloseOrderDialog order={order} open={dialog === "close"} onOpenChange={(o) => setDialog(o ? "close" : null)} /> : null}
     </div>
   );
@@ -99,14 +115,46 @@ function receivedToast(before: OrderDTO, after: OrderDTO) {
   });
 }
 
-function ReceiveAllDialog({ order, open, onOpenChange }: { order: OrderDTO; open: boolean; onOpenChange: (open: boolean) => void }) {
+type GstProp = { currencySymbol: string } | null;
+
+function useGst(order: OrderDTO) {
+  const [cgst, setCgst] = useState(order.cgst ? trimMoney(order.cgst) : "");
+  const [sgst, setSgst] = useState(order.sgst ? trimMoney(order.sgst) : "");
+  return { cgst, sgst, setCgst, setSgst };
+}
+
+/** CGST/SGST from the supplier's bill, with the bill total for this delivery to check against the paper. */
+function GstFields({ id, gst, state, itemsPaise }: { id: string; gst: NonNullable<GstProp>; state: ReturnType<typeof useGst>; itemsPaise: number }) {
+  const total = itemsPaise + toPaise(state.cgst) + toPaise(state.sgst);
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-3">
+        <GstInput id={`${id}-cgst`} label="CGST" value={state.cgst} onChange={state.setCgst} currencySymbol={gst.currencySymbol} />
+        <GstInput id={`${id}-sgst`} label="SGST" value={state.sgst} onChange={state.setSgst} currencySymbol={gst.currencySymbol} />
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Leave blank if the bill has no GST.{total > 0 ? ` Bill total: ${formatMoney(fromPaise(total), gst.currencySymbol)}` : ""}
+      </p>
+    </div>
+  );
+}
+
+const linePaise = (i: OrderDTO["items"][number], n: number) => (i.unitCost ? toPaise(i.unitCost) * n : 0);
+
+function ReceiveAllDialog({ order, gst, open, onOpenChange }: { order: OrderDTO; gst: GstProp; open: boolean; onOpenChange: (open: boolean) => void }) {
   const [pending, start] = useTransition();
   const [method, setMethod] = useState<Method>("CASH");
+  const gstState = useGst(order);
   const lines = order.items.filter((i) => i.pending > 0 && i.productId);
 
   const confirm = () =>
     start(async () => {
-      const res = await receiveOrderAction({ orderId: order.id, lines: "ALL", paymentMethod: method });
+      const res = await receiveOrderAction({
+        orderId: order.id,
+        lines: "ALL",
+        paymentMethod: method,
+        ...(gst ? { gst: { cgst: gstState.cgst, sgst: gstState.sgst } } : {}),
+      });
       if (!res.ok) {
         toast.error(res.error);
         return;
@@ -132,6 +180,7 @@ function ReceiveAllDialog({ order, open, onOpenChange }: { order: OrderDTO; open
             </li>
           ))}
         </ul>
+        {gst ? <GstFields id={`gst-all-${order.id}`} gst={gst} state={gstState} itemsPaise={lines.reduce((s, i) => s + linePaise(i, i.pending), 0)} /> : null}
         <PaidBy id={`paid-all-${order.id}`} value={method} onChange={setMethod} />
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Not yet</AlertDialogCancel>
@@ -145,7 +194,7 @@ function ReceiveAllDialog({ order, open, onOpenChange }: { order: OrderDTO; open
   );
 }
 
-function ReceivePartialDialog({ order, open, onOpenChange }: { order: OrderDTO; open: boolean; onOpenChange: (open: boolean) => void }) {
+function ReceivePartialDialog({ order, gst, open, onOpenChange }: { order: OrderDTO; gst: GstProp; open: boolean; onOpenChange: (open: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[90dvh] flex-col sm:max-w-lg">
@@ -155,16 +204,17 @@ function ReceivePartialDialog({ order, open, onOpenChange }: { order: OrderDTO; 
             Enter how many of each product came. Set 0 for anything that didn’t. The rest stays on {order.orderNumber} until it arrives.
           </DialogDescription>
         </DialogHeader>
-        {open ? <PartialForm order={order} close={() => onOpenChange(false)} /> : null}
+        {open ? <PartialForm order={order} gst={gst} close={() => onOpenChange(false)} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
+function PartialForm({ order, gst, close }: { order: OrderDTO; gst: GstProp; close: () => void }) {
   const lines = order.items.filter((i) => i.pending > 0 && i.productId);
   const [qty, setQty] = useState<Record<string, string>>(() => Object.fromEntries(lines.map((i) => [i.id, String(i.pending)])));
   const [method, setMethod] = useState<Method>("CASH");
+  const gstState = useGst(order);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
 
@@ -178,7 +228,12 @@ function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
     if (over) return setError(`Only ${over.item.pending} of “${over.item.name}” are pending.`);
     if (total === 0) return setError("Enter the quantity that arrived for at least one product.");
     start(async () => {
-      const res = await receiveOrderAction({ orderId: order.id, lines: parsed.map((p) => ({ itemId: p.item.id, quantity: p.n })), paymentMethod: method });
+      const res = await receiveOrderAction({
+        orderId: order.id,
+        lines: parsed.map((p) => ({ itemId: p.item.id, quantity: p.n })),
+        paymentMethod: method,
+        ...(gst ? { gst: { cgst: gstState.cgst, sgst: gstState.sgst } } : {}),
+      });
       if (!res.ok) return setError(res.error);
       receivedToast(order, res.data);
       close();
@@ -214,6 +269,7 @@ function PartialForm({ order, close }: { order: OrderDTO; close: () => void }) {
           </li>
         ))}
       </ul>
+      {gst ? <GstFields id={`gst-part-${order.id}`} gst={gst} state={gstState} itemsPaise={parsed.reduce((s, p) => s + linePaise(p.item, Math.min(p.n, p.item.pending)), 0)} /> : null}
       <PaidBy id={`paid-part-${order.id}`} value={method} onChange={setMethod} />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <DialogFooter>

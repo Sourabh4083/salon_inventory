@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { ArrowRight, Ban, Banknote, HandCoins, Landmark, Package, Scissors, Truck, Users, Wallet } from "lucide-react";
 import type { ProfitReport } from "@/lib/services/profit";
-import type { AccountMovement, Balances, MoneyEntry, MoneyMovement } from "@/lib/services/cashbook";
+import type { AccountMovement, Balances, MoneyEntry, MoneyMovement, OwnerWithdrawals } from "@/lib/services/cashbook";
 import { MoneyBalanceForm } from "@/components/app/money-balance-form";
 import { CashToBankForm, DeleteCashDeposit } from "@/components/app/cash-to-bank-form";
+import { DeleteOwnerWithdrawal, OwnerWithdrawalForm } from "@/components/app/owner-withdrawal-form";
 import type { ExpensePage } from "@/lib/services/expenses";
 import type { PurchaseReport } from "@/lib/services/orders";
 import { formatDate, formatDateTime, formatMoney, formatNumber } from "@/lib/format";
@@ -143,12 +144,12 @@ export function SalesView({ p, sym, billsHref }: { p: ProfitReport; sym: string;
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
         <TopList
-          title="Top products"
+          title="Products sold"
           icon={Package}
           rows={report.topProducts.map((x) => ({ key: x.productId ?? x.name, name: x.name, quantity: x.quantity, amount: money(x.amount), href: x.productId ? `/inventory/${x.productId}` : undefined }))}
           empty="No products sold in this period."
         />
-        <TopList title="Top services" icon={Scissors} rows={report.topServices.map((s) => ({ key: s.name, name: s.name, quantity: s.quantity, amount: money(s.amount) }))} empty="No services billed in this period." />
+        <TopList title="Services done" icon={Scissors} rows={report.topServices.map((s) => ({ key: s.name, name: s.name, quantity: s.quantity, amount: money(s.amount) }))} empty="No services billed in this period." />
       </div>
     </div>
   );
@@ -288,12 +289,16 @@ export function MoneyView({
   balances,
   movement,
   entries,
+  taken,
+  ownerNames,
   sym,
   rangeLabel,
 }: {
   balances: Balances | null;
   movement: MoneyMovement;
   entries: { items: MoneyEntry[]; more: boolean };
+  taken: OwnerWithdrawals;
+  ownerNames: string[];
   sym: string;
   rangeLabel: string;
 }) {
@@ -304,6 +309,7 @@ export function MoneyView({
     { label: "Salary paid", key: "salary", minus: true },
     { label: "Advances given", key: "advances", minus: true },
     { label: "Stock bought", key: "stock", minus: true },
+    { label: "Taken by owners", key: "taken", minus: true },
   ];
   const accounts = ["cash", "bank", "total"] as const;
   const tone = (v: string) => (toPaise(v) < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300");
@@ -323,6 +329,7 @@ export function MoneyView({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <OwnerWithdrawalForm ownerNames={ownerNames} currencySymbol={sym} />
             {balances && toPaise(balances.cash) > 0 ? <CashToBankForm cash={balances.cash} currencySymbol={sym} /> : null}
             <MoneyBalanceForm cash={balances?.cash ?? null} bank={balances?.bank ?? null} currencySymbol={sym} />
           </div>
@@ -391,6 +398,41 @@ export function MoneyView({
         </div>
       </Panel>
 
+      <Panel title="Taken by owners" icon={HandCoins} total={money(taken.total)} note={`Money the owners took for themselves, ${rangeLabel}. It lowers cash or bank, but not profit.`}>
+        {taken.byOwner.length ? (
+          <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {taken.byOwner.map((o) => (
+              <div key={o.ownerName} className="rounded-xl border p-4">
+                <p className="truncate text-sm text-muted-foreground">{o.ownerName}</p>
+                <p className="mt-1 text-2xl font-semibold tabular-nums">{money(o.amount)}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatNumber(o.count)} {o.count === 1 ? "time" : "times"}
+                </p>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty>Add the owners&apos; names in Settings, then use “Owner took money” each time one of you takes money.</Empty>
+        )}
+        {taken.items.length ? (
+          <ul className="mt-4 divide-y text-sm">
+            {taken.items.map((t) => (
+              <li key={t.id} className="flex items-center gap-3 py-2.5">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{t.ownerName}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {formatDate(t.takenOn)} · {PAYMENT_LABEL[t.paymentMethod]}
+                    {t.note ? ` · ${t.note}` : ""}
+                  </span>
+                </span>
+                <DeleteOwnerWithdrawal withdrawalId={t.id} label={`${t.ownerName} took ${money(t.amount)} on ${formatDate(t.takenOn)}`} />
+                <span className="w-28 text-right font-medium tabular-nums">{money(t.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </Panel>
+
       <Panel title="Passbook" icon={Banknote} note="Every payment in and out in this period, newest first.">
         {entries.items.length === 0 ? (
           <Empty>No money came in or went out in this period.</Empty>
@@ -411,6 +453,7 @@ export function MoneyView({
                   </span>
                 </span>
                 {e.depositId ? <DeleteCashDeposit depositId={e.depositId} amount={money(fromPaise(Math.abs(toPaise(e.amount))))} /> : null}
+                {e.withdrawalId ? <DeleteOwnerWithdrawal withdrawalId={e.withdrawalId} label={`${e.label}, ${money(fromPaise(Math.abs(toPaise(e.amount))))} on ${formatDate(e.date)}`} /> : null}
                 <span className={cn("w-28 text-right font-medium tabular-nums", tone(e.amount))}>
                   {toPaise(e.amount) < 0 ? `− ${money(fromPaise(-toPaise(e.amount)))}` : `+ ${money(e.amount)}`}
                 </span>

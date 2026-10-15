@@ -2,18 +2,19 @@ import { prisma } from "@/lib/db";
 import type { PaymentMethod } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import { recordAudit } from "@/lib/services/audit";
-import { getSettings } from "@/lib/services/settings";
+import { getOwnerNames, getSettings } from "@/lib/services/settings";
 import { fromPaise, toPaise } from "@/lib/money";
 import { formatMoney } from "@/lib/format";
-import { startOfDay, toDateParam } from "@/lib/dates";
+import { endOfDay, startOfDay, toDateParam } from "@/lib/dates";
+import { orderGstPaise } from "@/lib/services/orders";
 import type { SessionUser } from "@/lib/auth/session";
-import type { BalancesData, CashDepositData } from "@/lib/validation/schemas";
+import type { BalancesData, CashDepositData, OwnerWithdrawalData } from "@/lib/validation/schemas";
 
 /**
  * Where the shop's money is. Two accounts: the cash drawer (Cash) and the bank (UPI and
  * Card). Money received from customers adds to an account; expenses, salaries, advances
- * and stock paid for on receipt take from it. Cash the owner carries to the bank moves
- * from one account to the other. The owner counts both once, and the running balances
+ * and stock paid for on receipt take from it, and so does money an owner takes for
+ * themselves. Cash the owner carries to the bank moves from one account to the other. The owner counts both once, and the running balances
  * follow every entry made after that.
  */
 
@@ -29,7 +30,9 @@ export type AccountMovement = {
   salary: string;
   advances: string;
   stock: string;
-  /** Everything paid out. */
+  /** Money the owners took for themselves: lowers the balance, but not shop spending. */
+  taken: string;
+  /** Everything paid out, including what the owners took. */
   out: string;
   /** Cash carried to the bank: minus on cash, plus on bank, nothing on the total. */
   moved: string;
@@ -51,18 +54,20 @@ const stockWhere = (w: Window) => ({
   unitCost: { not: null },
   createdAt: { ...dated(w), ...(w.recordedAfter ? { gt: w.recordedAfter } : {}) },
 });
+const gstWhere = (w: Window) => ({ gstPaidAt: { ...dated(w), ...(w.recordedAfter ? { gt: w.recordedAfter } : {}) } });
 
-type Lines = { received: number; expenses: number; salary: number; advances: number; stock: number; moved: number };
-const noLines = (): Lines => ({ received: 0, expenses: 0, salary: 0, advances: 0, stock: 0, moved: 0 });
+type Lines = { received: number; expenses: number; salary: number; advances: number; stock: number; taken: number; moved: number };
+const noLines = (): Lines => ({ received: 0, expenses: 0, salary: 0, advances: 0, stock: 0, taken: 0, moved: 0 });
 
 function toMovement(l: Lines): AccountMovement {
-  const out = l.expenses + l.salary + l.advances + l.stock;
+  const out = l.expenses + l.salary + l.advances + l.stock + l.taken;
   return {
     received: fromPaise(l.received),
     expenses: fromPaise(l.expenses),
     salary: fromPaise(l.salary),
     advances: fromPaise(l.advances),
     stock: fromPaise(l.stock),
+    taken: fromPaise(l.taken),
     out: fromPaise(out),
     moved: fromPaise(l.moved),
     change: fromPaise(l.received - out + l.moved),
@@ -70,7 +75,7 @@ function toMovement(l: Lines): AccountMovement {
 }
 
 async function movement(w: Window): Promise<MoneyMovement> {
-  const [received, expenses, salary, advances, stock, deposits] = await Promise.all([
+  const [received, expenses, salary, advances, stock, deposits, gst, taken] = await Promise.all([
     prisma.billPayment.groupBy({ by: ["method"], where: { paidAt: dated(w), ...recorded(w), bill: { status: "COMPLETED" } }, _sum: { amount: true } }),
     prisma.expense.groupBy({ by: ["paymentMethod"], where: { spentOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
     // The amount is what was handed over, after advances and cuts, so advances are not counted twice.
@@ -78,6 +83,8 @@ async function movement(w: Window): Promise<MoneyMovement> {
     prisma.employeeAdvance.groupBy({ by: ["paymentMethod"], where: { takenOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
     prisma.stockMovement.findMany({ where: stockWhere(w), select: { paymentMethod: true, quantityChange: true, unitCost: true } }),
     prisma.cashDeposit.aggregate({ where: { movedOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
+    prisma.purchaseOrder.findMany({ where: gstWhere(w), select: { cgst: true, sgst: true, gstPaymentMethod: true } }),
+    prisma.ownerWithdrawal.groupBy({ by: ["paymentMethod"], where: { takenOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
   ]);
   const by: Record<Account, Lines> = { cash: noLines(), bank: noLines() };
   const paise = (v: { toString(): string } | null) => toPaise(v?.toString() ?? "0");
@@ -86,6 +93,8 @@ async function movement(w: Window): Promise<MoneyMovement> {
   for (const r of salary) by[accountOf(r.paymentMethod)].salary += paise(r._sum.amount);
   for (const r of advances) by[accountOf(r.paymentMethod)].advances += paise(r._sum.amount);
   for (const r of stock) by[accountOf(r.paymentMethod!)].stock += paise(r.unitCost) * r.quantityChange;
+  for (const o of gst) by[accountOf(o.gstPaymentMethod!)].stock += orderGstPaise(o);
+  for (const r of taken) by[accountOf(r.paymentMethod)].taken += paise(r._sum.amount);
   by.cash.moved = -paise(deposits._sum.amount);
   by.bank.moved = paise(deposits._sum.amount);
 
@@ -199,12 +208,14 @@ export type MoneyEntry = {
   href: string | null;
   /** Set on the two lines of a cash-to-bank move, so the owner can remove it. */
   depositId?: string;
+  /** Set on money an owner took, so it can be removed. */
+  withdrawalId?: string;
 };
 
 /** The passbook: every payment in or out in the period, newest first. */
 export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 200): Promise<{ items: MoneyEntry[]; more: boolean }> {
   const w: Window = range;
-  const [received, expenses, salary, advances, stock, deposits] = await Promise.all([
+  const [received, expenses, salary, advances, stock, deposits, gst, taken] = await Promise.all([
     prisma.billPayment.findMany({
       where: { paidAt: dated(w), bill: { status: "COMPLETED" } },
       orderBy: { paidAt: "desc" },
@@ -229,6 +240,8 @@ export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 
       select: { paymentMethod: true, quantityChange: true, unitCost: true, createdAt: true, purchaseOrder: { select: { id: true, orderNumber: true } } },
     }),
     prisma.cashDeposit.findMany({ where: { movedOn: dated(w) }, orderBy: { movedOn: "desc" }, take: limit + 1, select: { id: true, amount: true, movedOn: true } }),
+    prisma.purchaseOrder.findMany({ where: gstWhere(w), select: { id: true, orderNumber: true, cgst: true, sgst: true, gstPaidAt: true, gstPaymentMethod: true } }),
+    prisma.ownerWithdrawal.findMany({ where: { takenOn: dated(w) }, orderBy: { takenOn: "desc" }, take: limit + 1, select: { id: true, ownerName: true, amount: true, paymentMethod: true, takenOn: true } }),
   ]);
 
   type Row = Omit<MoneyEntry, "date" | "amount" | "account"> & { at: Date; paise: number; account?: Account };
@@ -244,17 +257,21 @@ export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 
     ...expenses.map((e) => ({ key: `exp-${e.id}`, at: e.spentOn, label: e.description, method: e.paymentMethod, paise: -toPaise(e.amount.toString()), href: "/expenses" })),
     ...salary.map((s) => ({ key: `sal-${s.id}`, at: s.paidOn, label: `Salary · ${s.employee.name}`, method: s.paymentMethod, paise: -toPaise(s.amount.toString()), href: `/employees/${s.employeeId}` })),
     ...advances.map((a) => ({ key: `adv-${a.id}`, at: a.takenOn, label: `Advance · ${a.employee.name}`, method: a.paymentMethod, paise: -toPaise(a.amount.toString()), href: `/employees/${a.employeeId}` })),
+    ...taken.map((t) => ({ key: `own-${t.id}`, at: t.takenOn, label: `Taken by ${t.ownerName}`, method: t.paymentMethod, paise: -toPaise(t.amount.toString()), href: null, withdrawalId: t.id })),
   ];
-  // One line per delivery: everything received on an order on a day, paid the same way.
+  // One line per delivery: everything received on an order on a day, paid the same way, with the bill's GST.
   const deliveries = new Map<string, Row>();
-  for (const m of stock) {
-    if (!m.purchaseOrder) continue;
-    const key = `stock-${m.purchaseOrder.id}-${m.paymentMethod}-${toDateParam(m.createdAt)}`;
-    const cur = deliveries.get(key) ?? { key, at: m.createdAt, label: `Stock · ${m.purchaseOrder.orderNumber}`, method: m.paymentMethod!, paise: 0, href: `/orders/${m.purchaseOrder.id}` };
-    cur.paise -= toPaise(m.unitCost!.toString()) * m.quantityChange;
-    if (m.createdAt > cur.at) cur.at = m.createdAt;
+  const addToDelivery = (order: { id: string; orderNumber: string }, method: PaymentMethod, at: Date, paise: number) => {
+    const key = `stock-${order.id}-${method}-${toDateParam(at)}`;
+    const cur = deliveries.get(key) ?? { key, at, label: `Stock · ${order.orderNumber}`, method, paise: 0, href: `/orders/${order.id}` };
+    cur.paise -= paise;
+    if (at > cur.at) cur.at = at;
     deliveries.set(key, cur);
+  };
+  for (const m of stock) {
+    if (m.purchaseOrder) addToDelivery(m.purchaseOrder, m.paymentMethod!, m.createdAt, toPaise(m.unitCost!.toString()) * m.quantityChange);
   }
+  for (const o of gst) addToDelivery(o, o.gstPaymentMethod!, o.gstPaidAt!, orderGstPaise(o));
   rows.push(...deliveries.values());
   // Like a real passbook: one line leaving the drawer, one arriving in the bank.
   for (const d of deposits) {
@@ -267,5 +284,81 @@ export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 
   return {
     items: rows.slice(0, limit).map(({ at, paise, account, ...r }) => ({ ...r, date: at.toISOString(), account: account ?? accountOf(r.method!), amount: fromPaise(paise) })),
     more: rows.length > limit,
+  };
+}
+
+/* ---------- Money the owners take ---------- */
+
+export type OwnerWithdrawalDTO = { id: string; ownerName: string; amount: string; takenOn: string; paymentMethod: PaymentMethod; note: string | null };
+
+export type OwnerWithdrawals = {
+  /** One row per owner in Settings (even with nothing taken), then any older names that still have entries. */
+  byOwner: { ownerName: string; amount: string; count: number }[];
+  total: string;
+  items: OwnerWithdrawalDTO[];
+};
+
+/** Owner: notes money one of the owners took from the drawer or the bank for themselves. */
+export async function addOwnerWithdrawal(input: OwnerWithdrawalData, actor: SessionUser, now = new Date()): Promise<void> {
+  if (actor.role !== "OWNER") throw new AppError("Only the owner can note this.", "FORBIDDEN");
+  const names = await getOwnerNames();
+  const ownerName = names.find((n) => n.toLowerCase() === input.ownerName.toLowerCase());
+  if (!ownerName) throw new AppError(names.length ? `Pick ${names.join(" or ")}.` : "Add the owners' names in Settings first.");
+  if (input.takenOn && input.takenOn > endOfDay(now)) throw new AppError("The date cannot be in the future.");
+  // A back-dated entry is filed on that day; today's keeps the real time.
+  const takenOn = input.takenOn && input.takenOn < startOfDay(now) ? input.takenOn : now;
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.ownerWithdrawal.create({
+      data: { ownerName, amount: input.amount, takenOn, paymentMethod: input.paymentMethod, note: input.note, createdById: actor.id },
+    });
+    await recordAudit(tx, {
+      action: "OWNER_WITHDRAWAL",
+      entityType: "OwnerWithdrawal",
+      entityId: row.id,
+      summary: `${ownerName} took ${input.amount} by ${input.paymentMethod}${input.note ? ` (${input.note})` : ""}`,
+      metadata: { ownerName, amount: input.amount, takenOn: takenOn.toISOString() },
+      actorId: actor.id,
+    });
+  });
+}
+
+/** Owner: removes an entry typed in by mistake; the money is back in the balance. */
+export async function deleteOwnerWithdrawal(id: string, actor: SessionUser): Promise<void> {
+  if (actor.role !== "OWNER") throw new AppError("Only the owner can remove this.", "FORBIDDEN");
+  await prisma.$transaction(async (tx) => {
+    const row = await tx.ownerWithdrawal.findUnique({ where: { id } });
+    if (!row) throw new AppError("That entry no longer exists.", "NOT_FOUND");
+    await tx.ownerWithdrawal.delete({ where: { id } });
+    await recordAudit(tx, {
+      action: "OWNER_WITHDRAWAL_DELETED",
+      entityType: "OwnerWithdrawal",
+      entityId: id,
+      summary: `Removed ${row.amount.toFixed(2)} taken by ${row.ownerName}`,
+      metadata: { ownerName: row.ownerName, amount: row.amount.toFixed(2) },
+      actorId: actor.id,
+    });
+  });
+}
+
+/** How much each owner took in the period, and every entry, newest first. */
+export async function getOwnerWithdrawals(range: { from: Date; to: Date }): Promise<OwnerWithdrawals> {
+  const [names, rows] = await Promise.all([
+    getOwnerNames(),
+    prisma.ownerWithdrawal.findMany({ where: { takenOn: { gte: range.from, lte: range.to } }, orderBy: [{ takenOn: "desc" }, { createdAt: "desc" }] }),
+  ]);
+  const sums = new Map<string, { paise: number; count: number }>(names.map((n) => [n, { paise: 0, count: 0 }]));
+  let total = 0;
+  for (const r of rows) {
+    const paise = toPaise(r.amount.toString());
+    const cur = sums.get(r.ownerName) ?? { paise: 0, count: 0 };
+    cur.paise += paise;
+    cur.count += 1;
+    sums.set(r.ownerName, cur);
+    total += paise;
+  }
+  return {
+    byOwner: [...sums.entries()].map(([ownerName, s]) => ({ ownerName, amount: fromPaise(s.paise), count: s.count })),
+    total: fromPaise(total),
+    items: rows.map((r) => ({ id: r.id, ownerName: r.ownerName, amount: r.amount.toFixed(2), takenOn: r.takenOn.toISOString(), paymentMethod: r.paymentMethod, note: r.note })),
   };
 }

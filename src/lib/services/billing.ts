@@ -826,11 +826,9 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
     })),
     topProducts: [...products.values()]
       .sort((a, b) => b.amount - a.amount)
-      .slice(0, 10)
       .map((p) => ({ productId: p.productId, name: p.name, quantity: p.quantity, amount: fromPaise(p.amount) })),
     topServices: [...services.values()]
       .sort((a, b) => b.amount - a.amount)
-      .slice(0, 10)
       .map((s) => ({ ...s, amount: fromPaise(s.amount) })),
     soldProducts: [...products.values()].sort((a, b) => b.cost - a.cost).map((p) => ({ ...p, amount: fromPaise(p.amount), cost: fromPaise(p.cost) })),
   };

@@ -50,7 +50,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             Everything on this order has been received and added to stock.
           </p>
         ) : null}
-        <OrderActions order={order} role={user.role} />
+        <OrderActions order={order} role={user.role} currencySymbol={sym} />
       </div>
 
       <section className="overflow-x-auto rounded-2xl border bg-card shadow-xs">
@@ -93,6 +93,16 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
             ))}
           </tbody>
           <tfoot className="border-t bg-muted/30 font-semibold">
+            {showCost
+              ? ([["CGST", order.cgst], ["SGST", order.sgst]] as const).map(([label, amount]) =>
+                  amount ? (
+                    <tr key={label} className="font-normal text-muted-foreground">
+                      <td className="px-4 py-2" colSpan={4}>{label}</td>
+                      <td className="px-4 py-2 text-right tabular-nums">{formatMoney(amount, sym)}</td>
+                    </tr>
+                  ) : null,
+                )
+              : null}
             <tr>
               <td className="px-4 py-3">Total</td>
               <td className="px-3 py-3 text-right tabular-nums">{order.totalOrdered}</td>

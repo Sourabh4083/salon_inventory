@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import { requirePermissionPage } from "@/lib/auth/guards";
-import { getSettings } from "@/lib/services/settings";
+import { getOwnerNames, getSettings } from "@/lib/services/settings";
 import { listCategories } from "@/lib/services/products";
 import { listAuditLogs } from "@/lib/services/audit";
 import { formatDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/app/page-header";
 import { SettingsForm } from "@/components/app/settings-form";
+import { OwnerNamesForm } from "@/components/app/owner-withdrawal-form";
 import { CategoryManager } from "@/components/app/category-manager";
 import { ServicesManager } from "@/components/app/services-manager";
 import { listServices } from "@/lib/services/billing";
@@ -14,13 +15,14 @@ export const metadata: Metadata = { title: "Settings" };
 
 export default async function SettingsPage() {
   await requirePermissionPage("settings.manage");
-  const [settings, categories, services, audit] = await Promise.all([getSettings(), listCategories(), listServices(), listAuditLogs(30)]);
+  const [settings, categories, services, audit, ownerNames] = await Promise.all([getSettings(), listCategories(), listServices(), listAuditLogs(30), getOwnerNames()]);
   return (
     <div className="space-y-6">
       <PageHeader title="Settings" description="Business details and the shop-wide low-stock rule." />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <SettingsForm settings={settings} />
         <CategoryManager categories={categories} />
+        <OwnerNamesForm ownerNames={ownerNames} />
       </div>
       <ServicesManager services={services} currencySymbol={settings.currencySymbol} />
       <section className="rounded-2xl border bg-card p-5 shadow-xs sm:p-6">

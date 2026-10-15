@@ -271,9 +271,22 @@ export const orderItemSchema = z.object({
 export const orderCreateSchema = z.object({
   items: z.array(orderItemSchema).min(1, "Add at least one product to the order.").max(200, "An order can have at most 200 products."),
   notes: optionalText(500),
+  /** GST amounts from the supplier's bill; blank when the bill has no GST. */
+  cgst: moneyInput,
+  sgst: moneyInput,
 });
 export type OrderCreateInput = z.input<typeof orderCreateSchema>;
 export type OrderCreateData = z.output<typeof orderCreateSchema>;
+
+/** Owner: fixing the money on an order that already had deliveries. Quantities and stock stay as they are. */
+export const orderCostsSchema = z.object({
+  items: z.array(z.object({ itemId: z.string().min(1), unitCost: moneyInput })).max(200),
+  notes: optionalText(500),
+  cgst: moneyInput,
+  sgst: moneyInput,
+});
+export type OrderCostsInput = z.input<typeof orderCostsSchema>;
+export type OrderCostsData = z.output<typeof orderCostsSchema>;
 
 export const orderReceiveSchema = z.object({
   orderId: z.string().min(1),
@@ -284,6 +297,8 @@ export const orderReceiveSchema = z.object({
   ]),
   /** How the shop paid for what arrived; its cost is taken from that account's balance. */
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** Owner only: GST from the bill that came with the delivery. Ignored once GST has been charged. */
+  gst: z.object({ cgst: moneyInput, sgst: moneyInput }).optional(),
 });
 export type OrderReceiveInput = z.input<typeof orderReceiveSchema>;
 export type OrderReceiveData = z.output<typeof orderReceiveSchema>;
@@ -474,6 +489,27 @@ export type BalancesData = z.output<typeof balancesSchema>;
 export const cashDepositSchema = z.object({ amount: positiveMoney });
 export type CashDepositInput = z.input<typeof cashDepositSchema>;
 export type CashDepositData = z.output<typeof cashDepositSchema>;
+
+/** Money one of the owners took from the shop for themselves. */
+export const ownerWithdrawalSchema = z.object({
+  ownerName: trimmed(60).min(1, "Pick who took the money."),
+  amount: positiveMoney,
+  takenOn: optionalDateInput,
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  note: optionalText(200),
+});
+export type OwnerWithdrawalInput = z.input<typeof ownerWithdrawalSchema>;
+export type OwnerWithdrawalData = z.output<typeof ownerWithdrawalSchema>;
+
+/** The shop's owners, typed once in Settings. Blank boxes are dropped. */
+export const ownerNamesSchema = z.object({
+  names: z
+    .array(trimmed(60))
+    .max(2)
+    .transform((names) => names.filter(Boolean))
+    .refine((names) => new Set(names.map((n) => n.toLowerCase())).size === names.length, "The two names must be different."),
+});
+export type OwnerNamesInput = z.input<typeof ownerNamesSchema>;
 
 // ---- Bill editing (owner) ----
 
