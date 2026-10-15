@@ -7,7 +7,9 @@ import { createExpense } from "@/lib/services/expenses";
 import { daysInMonth, staffPayForRange } from "@/lib/services/attendance";
 import { getDashboardStats } from "@/lib/services/inventory";
 import { getProfitReport } from "@/lib/services/profit";
-import { billCreateSchema, employeeSchema, expenseSchema, productCreateSchema } from "@/lib/validation/schemas";
+import { addOwnerWithdrawal } from "@/lib/services/cashbook";
+import { setOwnerNames } from "@/lib/services/settings";
+import { billCreateSchema, employeeSchema, expenseSchema, ownerWithdrawalSchema, productCreateSchema } from "@/lib/validation/schemas";
 import { endOfDay, monthRange, startOfDay, toDateParam } from "@/lib/dates";
 import { addDaysInZone, zonedDate } from "@/lib/timezone";
 import { fromPaise, toPaise } from "@/lib/money";
@@ -153,5 +155,19 @@ describe("stock value on the dashboard", () => {
     await product({ name: "No Cost", startingQuantity: 7 });
     await product({ name: "Empty", costPrice: "999", startingQuantity: 0 });
     expect((await getDashboardStats()).stockValue).toBe("482.00");
+  });
+});
+
+describe("money the owners take", () => {
+  it("does not change sales, money spent or profit", async () => {
+    await createBill(billCreateSchema.parse({ items: [{ kind: "SERVICE", name: "Haircut", quantity: 1, unitPrice: "800" }] }), manager);
+    const range = { from: startOfDay(new Date()), to: endOfDay(new Date()) };
+    const before = await getProfitReport(range);
+
+    await setOwnerNames(["Akshay"], owner.id);
+    await addOwnerWithdrawal(ownerWithdrawalSchema.parse({ ownerName: "Akshay", amount: "500" }), owner);
+
+    const after = await getProfitReport(range);
+    expect([after.sales, after.spent, after.profit]).toEqual([before.sales, before.spent, before.profit]);
   });
 });

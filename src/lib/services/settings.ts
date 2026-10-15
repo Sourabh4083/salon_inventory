@@ -51,3 +51,25 @@ export async function updateSettings(data: BusinessSettingsData, actorId: string
   });
   return row;
 }
+
+/** The shop's owners (partners), or an empty list until they are typed in Settings. */
+export async function getOwnerNames(): Promise<string[]> {
+  await getSettings(); // makes sure the settings row exists
+  const row = await prisma.businessSettings.findUnique({ where: { id: "default" }, select: { ownerNames: true } });
+  return row?.ownerNames ?? [];
+}
+
+export async function setOwnerNames(names: string[], actorId: string) {
+  const before = await getOwnerNames();
+  await prisma.businessSettings.update({ where: { id: "default" }, data: { ownerNames: names } });
+  await prisma.auditLog.create({
+    data: {
+      action: "SETTINGS_UPDATED",
+      entityType: "BusinessSettings",
+      entityId: "default",
+      summary: `Owners set to ${names.length ? names.join(" and ") : "none"}`,
+      metadata: { before, after: names },
+      actorId,
+    },
+  });
+}

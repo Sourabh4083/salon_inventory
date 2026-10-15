@@ -6,12 +6,14 @@ import { toActionError, type ActionResult } from "@/lib/errors";
 import {
   fieldErrors,
   orderCloseSchema,
+  orderCostsSchema,
   orderCreateSchema,
   orderReceiveSchema,
+  type OrderCostsInput,
   type OrderCreateInput,
   type OrderReceiveInput,
 } from "@/lib/validation/schemas";
-import { closeOrder, createOrder, orderForViewer, receiveOrder, updateOrder, type OrderDTO } from "@/lib/services/orders";
+import { closeOrder, createOrder, orderForViewer, receiveOrder, updateOrder, updateOrderCosts, type OrderDTO } from "@/lib/services/orders";
 import { listProducts, productsForViewer, type ProductDTO } from "@/lib/services/products";
 
 function revalidateOrders(orderId?: string) {
@@ -46,6 +48,21 @@ export async function updateOrderAction(orderId: string, input: OrderCreateInput
       return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the order.", fieldErrors: fieldErrors(parsed.error) };
     }
     const order = await updateOrder(orderId, parsed.data, user);
+    revalidateOrders(order.id);
+    return { ok: true, data: order };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function updateOrderCostsAction(orderId: string, input: OrderCostsInput): Promise<ActionResult<OrderDTO>> {
+  try {
+    const user = await requirePermission("order.manage");
+    const parsed = orderCostsSchema.safeParse(input);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues[0]?.message ?? "Please check the amounts.", fieldErrors: fieldErrors(parsed.error) };
+    }
+    const order = await updateOrderCosts(orderId, parsed.data, user);
     revalidateOrders(order.id);
     return { ok: true, data: order };
   } catch (err) {

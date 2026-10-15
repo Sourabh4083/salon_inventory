@@ -7,7 +7,18 @@ import { recordAdvance } from "@/lib/services/advances";
 import { createExpense } from "@/lib/services/expenses";
 import { createOrder, receiveOrder } from "@/lib/services/orders";
 import { recordStockIn } from "@/lib/services/inventory";
-import { deleteCashDeposit, getBalances, getMoneyMovement, listMoneyEntries, moveCashToBank, setBalances } from "@/lib/services/cashbook";
+import {
+  addOwnerWithdrawal,
+  deleteCashDeposit,
+  deleteOwnerWithdrawal,
+  getBalances,
+  getMoneyMovement,
+  getOwnerWithdrawals,
+  listMoneyEntries,
+  moveCashToBank,
+  setBalances,
+} from "@/lib/services/cashbook";
+import { getOwnerNames, setOwnerNames } from "@/lib/services/settings";
 import {
   advanceSchema,
   balancesSchema,
@@ -18,6 +29,8 @@ import {
   expenseSchema,
   orderCreateSchema,
   orderReceiveSchema,
+  ownerNamesSchema,
+  ownerWithdrawalSchema,
   productCreateSchema,
   salaryPaymentSchema,
 } from "@/lib/validation/schemas";
@@ -107,6 +120,24 @@ describe("money in and out for a period", () => {
     expect(m.bank.stock).toBe("120.00");
     expect(m.cash.stock).toBe("360.00"); // 3 glue; the tape has no cost price
     expect(await prisma.stockMovement.count({ where: { paymentMethod: null, type: "STOCK_IN" } })).toBe(1);
+  });
+
+  it("takes the bill's GST from the account chosen on the first delivery, in the same passbook line", async () => {
+    const glue = await product("Glue");
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 2, unitCost: "100" }], cgst: "18", sgst: "18" }), owner);
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: o.items[0].id, quantity: 1 }], paymentMethod: "UPI" }), manager);
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "CASH" }), manager);
+
+    const m = await getMoneyMovement(today());
+    expect(m.bank.stock).toBe("136.00");
+    expect(m.cash.stock).toBe("100.00");
+    const { items } = await listMoneyEntries(today());
+    expect(items.filter((i) => i.label === `Stock · ${o.orderNumber}`).map((i) => [i.account, i.amount])).toEqual(
+      expect.arrayContaining([
+        ["bank", "-136.00"],
+        ["cash", "-100.00"],
+      ]),
+    );
   });
 
   it("lists every entry in the passbook, newest first, one line per delivery", async () => {
@@ -206,5 +237,73 @@ describe("running balances", () => {
     await tick();
     await setBalances(balancesSchema.parse({ cash: "250", bank: "600" }), owner);
     expect(await getBalances()).toMatchObject({ cash: "250.00", bank: "600.00" });
+  });
+});
+
+describe("money the owners take", () => {
+  const take = (ownerName: string, amount: string, paymentMethod: Method, extra: Record<string, unknown> = {}, actor = owner) =>
+    addOwnerWithdrawal(ownerWithdrawalSchema.parse({ ownerName, amount, paymentMethod, ...extra }), actor);
+
+  beforeEach(async () => {
+    await setOwnerNames(ownerNamesSchema.parse({ names: ["Akshay", "Rahul"] }).names, owner.id);
+  });
+
+  it("comes off cash or bank and shows each owner's total", async () => {
+    await setBalances(balancesSchema.parse({ cash: "5000", bank: "20000" }), owner);
+    await tick();
+    await take("Akshay", "500", "CASH");
+    await take("rahul", "1000", "UPI", { note: "Rent at home" });
+    await take("Akshay", "250", "CASH");
+
+    expect(await getBalances()).toMatchObject({ cash: "4250.00", bank: "19000.00", total: "23250.00" });
+    const m = await getMoneyMovement(today());
+    expect([m.cash.taken, m.bank.taken, m.total.taken, m.total.out]).toEqual(["750.00", "1000.00", "1750.00", "1750.00"]);
+
+    const t = await getOwnerWithdrawals(today());
+    expect(t.total).toBe("1750.00");
+    expect(t.byOwner).toEqual([
+      { ownerName: "Akshay", amount: "750.00", count: 2 },
+      { ownerName: "Rahul", amount: "1000.00", count: 1 },
+    ]);
+    expect(t.items.find((i) => i.ownerName === "Rahul")).toMatchObject({ note: "Rent at home", paymentMethod: "UPI" });
+
+    const { items } = await listMoneyEntries(today());
+    const rahul = items.find((i) => i.label === "Taken by Rahul")!;
+    expect(rahul).toMatchObject({ account: "bank", amount: "-1000.00" });
+
+    await expect(deleteOwnerWithdrawal(rahul.withdrawalId!, manager)).rejects.toThrow(/owner/i);
+    await deleteOwnerWithdrawal(rahul.withdrawalId!, owner);
+    expect(await getBalances()).toMatchObject({ cash: "4250.00", bank: "20000.00" });
+    expect(await prisma.auditLog.count({ where: { action: { in: ["OWNER_WITHDRAWAL", "OWNER_WITHDRAWAL_DELETED"] } } })).toBe(4);
+  });
+
+  it("only counts entries dated inside the period", async () => {
+    const lastWeek = toDateParam(addDaysInZone(new Date(), -7));
+    await take("Akshay", "900", "CASH", { takenOn: lastWeek });
+    await take("Akshay", "100", "CASH");
+
+    expect((await getOwnerWithdrawals(today())).byOwner).toEqual([
+      { ownerName: "Akshay", amount: "100.00", count: 1 },
+      { ownerName: "Rahul", amount: "0.00", count: 0 },
+    ]);
+    const week = { from: startOfDay(addDaysInZone(new Date(), -7)), to: endOfDay(new Date()) };
+    expect((await getOwnerWithdrawals(week)).total).toBe("1000.00");
+  });
+
+  it("is for the owner login, and only for the names in Settings", async () => {
+    await expect(take("Akshay", "100", "CASH", {}, manager)).rejects.toThrow(/owner/i);
+    await expect(take("Somebody", "100", "CASH")).rejects.toThrow(/Akshay or Rahul/);
+    await expect(take("Akshay", "100", "CASH", { takenOn: toDateParam(addDaysInZone(new Date(), 2)) })).rejects.toThrow(/future/);
+    expect(ownerWithdrawalSchema.safeParse({ ownerName: "Akshay", amount: "0" }).success).toBe(false);
+
+    await setOwnerNames([], owner.id);
+    await expect(take("Akshay", "100", "CASH")).rejects.toThrow(/Settings/);
+    expect(await prisma.ownerWithdrawal.count()).toBe(0);
+  });
+
+  it("keeps two different names and drops blank boxes", async () => {
+    expect(ownerNamesSchema.safeParse({ names: ["Akshay", "akshay "] }).success).toBe(false);
+    expect(ownerNamesSchema.parse({ names: [" Akshay ", ""] }).names).toEqual(["Akshay"]);
+    expect(await getOwnerNames()).toEqual(["Akshay", "Rahul"]);
   });
 });

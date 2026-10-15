@@ -117,6 +117,7 @@ model User {
   advances          EmployeeAdvance[]  @relation("AdvanceCreatedBy")
   expenses          Expense[]          @relation("ExpenseCreatedBy")
   cashDeposits      CashDeposit[]      @relation("CashDepositCreatedBy")
+  ownerWithdrawals  OwnerWithdrawal[]  @relation("OwnerWithdrawalCreatedBy")
   billPayments      BillPayment[]      @relation("BillPaymentCreatedBy")
   enquiries         Enquiry[]          @relation("EnquiryCreatedBy")
   enquiryCalls      EnquiryCall[]      @relation("EnquiryCallBy")
@@ -326,6 +327,11 @@ model PurchaseOrder {
   closedById  String?
   closedAt    DateTime?
   closeReason String?
+  // GST from the supplier's bill, typed as amounts. Charged to cash/bank once, on the first delivery.
+  cgst             Decimal?       @db.Decimal(12, 2)
+  sgst             Decimal?       @db.Decimal(12, 2)
+  gstPaidAt        DateTime?
+  gstPaymentMethod PaymentMethod?
 
   items     PurchaseOrderItem[]
   movements StockMovement[]
@@ -333,6 +339,7 @@ model PurchaseOrder {
   closedBy  User?               @relation("OrderClosedBy", fields: [closedById], references: [id])
 
   @@index([status, createdAt])
+  @@index([gstPaidAt])
 }
 
 model PurchaseOrderItem {
@@ -364,6 +371,8 @@ model BusinessSettings {
   openingCash       Decimal?  @db.Decimal(12, 2)
   openingBank       Decimal?  @db.Decimal(12, 2)
   openingAt         DateTime?
+  /// The shop's owners (partners), picked when one of them takes money from the shop.
+  ownerNames        String[]  @default([])
   updatedAt         DateTime  @updatedAt
 }
 
@@ -574,4 +583,23 @@ model CashDeposit {
   createdBy User @relation("CashDepositCreatedBy", fields: [createdById], references: [id])
 
   @@index([movedOn])
+}
+
+/// Money one of the owners took from the shop for themselves. Lowers Cash or Bank,
+/// but is not shop spending, so it never touches profit. The name is kept as typed so
+/// renaming an owner in Settings leaves old entries as they were.
+model OwnerWithdrawal {
+  id            String        @id @default(cuid())
+  ownerName     String
+  amount        Decimal       @db.Decimal(12, 2)
+  takenOn       DateTime
+  paymentMethod PaymentMethod @default(CASH)
+  note          String?
+  createdById   String
+  createdAt     DateTime      @default(now())
+
+  createdBy User @relation("OwnerWithdrawalCreatedBy", fields: [createdById], references: [id])
+
+  @@index([takenOn])
+  @@index([ownerName, takenOn])
 }

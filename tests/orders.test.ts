@@ -1,8 +1,8 @@
 import { beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { createProduct, deleteProduct, getProduct } from "@/lib/services/products";
-import { closeOrder, createOrder, getOrder, getPendingOrdersForProduct, getPurchaseReport, listOrders, orderForViewer, receiveOrder, updateOrder } from "@/lib/services/orders";
-import { orderCreateSchema, orderReceiveSchema, productCreateSchema } from "@/lib/validation/schemas";
+import { closeOrder, createOrder, getOrder, getPendingOrdersForProduct, getPurchaseReport, listOrders, orderForViewer, receiveOrder, updateOrder, updateOrderCosts } from "@/lib/services/orders";
+import { orderCostsSchema, orderCreateSchema, orderReceiveSchema, productCreateSchema } from "@/lib/validation/schemas";
 import { seedBasics } from "./helpers";
 import type { SessionUser } from "@/lib/auth/session";
 
@@ -235,5 +235,97 @@ describe("purchase report", () => {
 
     const before = await getPurchaseReport({ from: new Date(start.getTime() - 60_000), to: new Date(start.getTime() - 1) });
     expect(before.orders.map((x) => x.orderId)).not.toContain(o.id);
+  });
+});
+
+describe("GST on the supplier's bill", () => {
+  it("adds CGST and SGST to the order total; blank means no GST", async () => {
+    const p = await product("Gst Shampoo");
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 2, unitCost: "500" }], cgst: "90", sgst: "90" }), owner);
+    expect([o.cgst, o.sgst, o.totalCost, o.gstPaid]).toEqual(["90.00", "90.00", "1180.00", false]);
+
+    const plain = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1, unitCost: "500" }], cgst: "", sgst: "" }), owner);
+    expect([plain.cgst, plain.sgst, plain.totalCost]).toEqual([null, null, "500.00"]);
+
+    const edited = await updateOrder(plain.id, orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1, unitCost: "500" }], cgst: "45", sgst: "45" }), owner);
+    expect(edited.totalCost).toBe("590.00");
+  });
+
+  it("ignores GST typed by a manager and hides it from them", async () => {
+    const p = await product("Gst Manager", { costPrice: "100" });
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1 }], cgst: "9", sgst: "9" }), manager);
+    expect([o.cgst, o.sgst]).toEqual([null, null]);
+
+    const mine = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1 }], cgst: "9", sgst: "9" }), owner);
+    expect(orderForViewer(mine, "MANAGER")).toMatchObject({ cgst: null, sgst: null, totalCost: null });
+    // A manager receiving keeps the owner's GST.
+    const done = await receiveOrder(orderReceiveSchema.parse({ orderId: mine.id, lines: "ALL", gst: { cgst: "1", sgst: "1" } }), manager);
+    expect([done.cgst, done.sgst, done.gstPaid]).toEqual(["9.00", "9.00", true]);
+  });
+
+  it("charges GST once, on the first delivery, and lets the owner type it from the bill then", async () => {
+    const start = new Date();
+    const a = await product("Gst Part A");
+    const b = await product("Gst Part B");
+    const o = await createOrder(order([{ productId: a.id, quantity: 2, unitCost: "100" }, { productId: b.id, quantity: 1, unitCost: "300" }]), owner);
+
+    const first = await receiveOrder(
+      orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: o.items[0].id, quantity: 2 }], paymentMethod: "UPI", gst: { cgst: "45", sgst: "45" } }),
+      owner,
+    );
+    expect([first.cgst, first.sgst, first.gstPaid, first.totalCost]).toEqual(["45.00", "45.00", true, "590.00"]);
+    const row = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: o.id } });
+    expect(row.gstPaymentMethod).toBe("UPI");
+
+    // Later changes are ignored once the GST has been paid.
+    const rest = await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", gst: { cgst: "1", sgst: "1" } }), owner);
+    expect([rest.cgst, rest.status]).toEqual(["45.00", "RECEIVED"]);
+
+    const report = await getPurchaseReport({ from: start, to: new Date() });
+    expect(report.orders.find((x) => x.orderId === o.id)?.amount).toBe("590.00");
+  });
+});
+
+describe("fixing the amounts on a received order", () => {
+  const costs = (items: { itemId: string; unitCost: string }[], extra: Record<string, unknown> = {}) => orderCostsSchema.parse({ items, ...extra });
+
+  it("changes cost per unit and GST everywhere, without touching stock", async () => {
+    const start = new Date();
+    const a = await product("Fix A", { costPrice: "100" });
+    const o = await createOrder(order([{ productId: a.id, quantity: 3, unitCost: "100" }]), owner);
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "UPI" }), owner);
+
+    const fixed = await updateOrderCosts(o.id, costs([{ itemId: o.items[0].id, unitCost: "120" }], { cgst: "32.40", sgst: "32.40", notes: "Bill 778" }), owner);
+    expect([fixed.status, fixed.totalReceived, fixed.items[0].unitCost, fixed.totalCost, fixed.gstPaid, fixed.notes]).toEqual(["RECEIVED", 3, "120.00", "424.80", true, "Bill 778"]);
+    expect(await getProduct(a.id)).toMatchObject({ quantity: 3, costPrice: "120" });
+
+    const m = await prisma.stockMovement.findFirstOrThrow({ where: { purchaseOrderId: o.id } });
+    expect(m.unitCost?.toFixed(2)).toBe("120.00");
+    const row = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: o.id } });
+    // GST added later counts as paid with the delivery, the same way.
+    expect([row.gstPaymentMethod, row.gstPaidAt?.getTime()]).toEqual(["UPI", m.createdAt.getTime()]);
+    const report = await getPurchaseReport({ from: start, to: new Date() });
+    expect(report.orders.find((x) => x.orderId === o.id)?.amount).toBe("424.80");
+
+    // Removing the GST takes it back out.
+    const noGst = await updateOrderCosts(o.id, costs([], { cgst: "", sgst: "" }), owner);
+    expect([noGst.totalCost, noGst.gstPaid]).toEqual(["360.00", false]);
+  });
+
+  it("leaves a product's cost price alone when a later order set it", async () => {
+    const p = await product("Fix Later", { costPrice: "50" });
+    const first = await createOrder(order([{ productId: p.id, quantity: 1, unitCost: "50" }]), owner);
+    await receiveOrder(receive(first.id, "ALL"), owner);
+    const second = await createOrder(order([{ productId: p.id, quantity: 1, unitCost: "70" }]), owner);
+    await receiveOrder(receive(second.id, "ALL"), owner);
+
+    await updateOrderCosts(first.id, costs([{ itemId: first.items[0].id, unitCost: "55" }]), owner);
+    expect((await getProduct(p.id))?.costPrice).toBe("70");
+  });
+
+  it("is owner only", async () => {
+    const p = await product("Fix Manager");
+    const o = await createOrder(order([{ productId: p.id, quantity: 1, unitCost: "10" }]), owner);
+    await expect(updateOrderCosts(o.id, costs([{ itemId: o.items[0].id, unitCost: "1" }]), manager)).rejects.toThrow(/owner/i);
   });
 });

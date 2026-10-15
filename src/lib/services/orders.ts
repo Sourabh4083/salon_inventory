@@ -7,7 +7,7 @@ import { recordAudit } from "@/lib/services/audit";
 import { applyChange, lockProduct } from "@/lib/services/inventory";
 import { fromPaise, toPaise } from "@/lib/money";
 import { PAGE_SIZE } from "@/lib/constants";
-import type { OrderCreateData, OrderReceiveData } from "@/lib/validation/schemas";
+import type { OrderCostsData, OrderCreateData, OrderReceiveData } from "@/lib/validation/schemas";
 
 /* ---------- DTOs ---------- */
 
@@ -48,7 +48,12 @@ export type OrderDTO = {
   totalReceived: number;
   /** Units still expected. On a CLOSED order these are the units that never came. */
   totalPending: number;
-  /** Owner-only; null for managers or when no line has a cost. */
+  /** Owner-only; null for managers. */
+  cgst: string | null;
+  sgst: string | null;
+  /** True once the GST has been charged to cash/bank (on the first delivery). */
+  gstPaid: boolean;
+  /** Owner-only: items plus GST; null for managers or when nothing has a cost. */
   totalCost: string | null;
   /** Lines that can still be booked in (pending and product still exists). */
   receivableLines: number;
@@ -90,6 +95,11 @@ function toOrderDTO(o: OrderRow): OrderDTO {
       inStock: i.product?.quantity ?? null,
     };
   });
+  const gst = orderGstPaise(o);
+  if (gst > 0) {
+    hasCost = true;
+    cost += gst;
+  }
   return {
     id: o.id,
     orderNumber: o.orderNumber,
@@ -104,15 +114,22 @@ function toOrderDTO(o: OrderRow): OrderDTO {
     totalOrdered,
     totalReceived,
     totalPending: totalOrdered - totalReceived,
+    cgst: o.cgst ? o.cgst.toFixed(2) : null,
+    sgst: o.sgst ? o.sgst.toFixed(2) : null,
+    gstPaid: o.gstPaidAt !== null,
     totalCost: hasCost ? fromPaise(cost) : null,
     receivableLines,
   };
 }
 
+export function orderGstPaise(o: { cgst: { toString(): string } | null; sgst: { toString(): string } | null }) {
+  return toPaise(o.cgst?.toString() ?? "0") + toPaise(o.sgst?.toString() ?? "0");
+}
+
 /** Costs are owner-only, same rule as productForViewer. */
 export function orderForViewer<T extends OrderDTO>(dto: T, role: Role): T {
   if (role === "OWNER") return dto;
-  return { ...dto, totalCost: null, items: dto.items.map((i) => ({ ...i, unitCost: null })) };
+  return { ...dto, totalCost: null, cgst: null, sgst: null, items: dto.items.map((i) => ({ ...i, unitCost: null })) };
 }
 
 async function nextOrderNumber(tx: Prisma.TransactionClient) {
@@ -175,13 +192,16 @@ async function buildLines(tx: Prisma.TransactionClient, items: OrderCreateData["
  * owner-only: a manager's order takes each product's saved cost price instead.
  */
 export async function createOrder(data: OrderCreateData, actor: SessionUser): Promise<OrderDetailDTO> {
-  const items = actor.role === "OWNER" ? data.items : data.items.map((i) => ({ ...i, unitCost: null }));
+  const isOwner = actor.role === "OWNER";
+  const items = isOwner ? data.items : data.items.map((i) => ({ ...i, unitCost: null }));
   const orderId = await prisma.$transaction(async (tx) => {
     const lines = await buildLines(tx, items);
     const order = await tx.purchaseOrder.create({
       data: {
         orderNumber: await nextOrderNumber(tx),
         notes: data.notes,
+        cgst: isOwner ? data.cgst : null,
+        sgst: isOwner ? data.sgst : null,
         createdById: actor.id,
         items: { createMany: { data: lines } },
       },
@@ -211,13 +231,81 @@ export async function updateOrder(orderId: string, data: OrderCreateData, actor:
     await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: orderId } });
     await tx.purchaseOrder.update({
       where: { id: orderId },
-      data: { notes: data.notes, items: { createMany: { data: lines } } },
+      data: { notes: data.notes, cgst: data.cgst, sgst: data.sgst, items: { createMany: { data: lines } } },
     });
     await recordAudit(tx, {
       action: "ORDER_UPDATED",
       entityType: "PurchaseOrder",
       entityId: orderId,
       summary: `Edited ${order.orderNumber}: now ${lines.length} product${lines.length === 1 ? "" : "s"}`,
+      actorId: actor.id,
+    });
+  });
+  return (await getOrder(orderId))!;
+}
+
+/**
+ * Owner only. Fixes the money on an order that has had deliveries (cost per unit, GST,
+ * note). Quantities and stock are not touched. Deliveries already booked take the new
+ * cost, so Cash vs Bank and the reports follow; a product whose cost price came from
+ * this order takes it too. GST added afterwards counts as paid with the first delivery.
+ */
+export async function updateOrderCosts(orderId: string, data: OrderCostsData, actor: SessionUser): Promise<OrderDetailDTO> {
+  requireOwner(actor, "edit orders");
+  await prisma.$transaction(async (tx) => {
+    const order = await lockOrder(tx, orderId);
+    const items = await tx.purchaseOrderItem.findMany({ where: { purchaseOrderId: orderId } });
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const changes: string[] = [];
+
+    for (const line of data.items) {
+      const item = byId.get(line.itemId);
+      if (!item) throw new AppError("That product is not on this order.", "NOT_FOUND");
+      // Blank keeps the cost as it is.
+      if (line.unitCost === null) continue;
+      const before = item.unitCost?.toFixed(2) ?? null;
+      const after = Number(line.unitCost).toFixed(2);
+      if (before === after) continue;
+      await tx.purchaseOrderItem.update({ where: { id: item.id }, data: { unitCost: after } });
+      if (item.productId) {
+        // A line without a cost was booked at the product's cost price at the time.
+        const booked = before ?? (await tx.stockMovement.findFirst({ where: { purchaseOrderId: orderId, productId: item.productId, type: "STOCK_IN" }, select: { unitCost: true } }))?.unitCost?.toFixed(2) ?? null;
+        await tx.stockMovement.updateMany({ where: { purchaseOrderId: orderId, productId: item.productId, type: "STOCK_IN" }, data: { unitCost: after } });
+        const product = await tx.product.findUnique({ where: { id: item.productId }, select: { costPrice: true } });
+        if (product && item.quantityReceived > 0 && (product.costPrice === null || product.costPrice.toFixed(2) === booked)) {
+          await tx.product.update({ where: { id: item.productId }, data: { costPrice: after } });
+        }
+      }
+      changes.push(`${item.name} ${before ?? "no cost"} → ${after}`);
+    }
+
+    const current = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: orderId }, select: { cgst: true, sgst: true, notes: true, gstPaidAt: true } });
+    const orderData: Prisma.PurchaseOrderUpdateInput = { cgst: data.cgst, sgst: data.sgst, notes: data.notes };
+    const gst = orderGstPaise(data);
+    if (gst !== orderGstPaise(current)) changes.push(`GST ${fromPaise(orderGstPaise(current))} → ${fromPaise(gst)}`);
+    if (gst === 0) {
+      orderData.gstPaidAt = null;
+      orderData.gstPaymentMethod = null;
+    } else if (!current.gstPaidAt) {
+      // Paid with the bill, i.e. the first delivery; with no delivery yet it is charged on receipt.
+      const first = await tx.stockMovement.findFirst({
+        where: { purchaseOrderId: orderId, type: "STOCK_IN", paymentMethod: { not: null } },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true, paymentMethod: true },
+      });
+      if (first) {
+        orderData.gstPaidAt = first.createdAt;
+        orderData.gstPaymentMethod = first.paymentMethod;
+      }
+    }
+    if ((current.notes ?? null) !== data.notes) changes.push("note");
+    await tx.purchaseOrder.update({ where: { id: orderId }, data: orderData });
+
+    await recordAudit(tx, {
+      action: "ORDER_UPDATED",
+      entityType: "PurchaseOrder",
+      entityId: orderId,
+      summary: `Fixed amounts on ${order.orderNumber}${changes.length ? `: ${changes.join(", ")}` : ""}`,
       actorId: actor.id,
     });
   });
@@ -300,7 +388,16 @@ export async function receiveOrder(input: OrderReceiveData, actor: SessionUser):
 
     // Lines whose product was deleted can never arrive, so they don't hold the order open.
     const stillPending = items.some((i) => i.productId && i.quantityOrdered - i.quantityReceived - (take.get(i.id) ?? 0) > 0);
-    if (!stillPending) await tx.purchaseOrder.update({ where: { id: order.id }, data: { status: "RECEIVED" } });
+    const orderData: Prisma.PurchaseOrderUpdateInput = {};
+    const current = await tx.purchaseOrder.findUniqueOrThrow({ where: { id: order.id }, select: { cgst: true, sgst: true, gstPaidAt: true } });
+    if (!current.gstPaidAt) {
+      // The bill comes with the delivery, so the owner may type or correct its GST here.
+      const gst = actor.role === "OWNER" && input.gst ? input.gst : current;
+      if (gst !== current) Object.assign(orderData, { cgst: gst.cgst, sgst: gst.sgst });
+      if (orderGstPaise(gst) > 0) Object.assign(orderData, { gstPaidAt: new Date(), gstPaymentMethod: input.paymentMethod });
+    }
+    if (!stillPending) orderData.status = "RECEIVED";
+    if (Object.keys(orderData).length) await tx.purchaseOrder.update({ where: { id: order.id }, data: orderData });
 
     const units = lines.reduce((n, l) => n + l.quantity, 0);
     await recordAudit(tx, {
@@ -412,7 +509,7 @@ export async function getPendingOrdersForProduct(productId: string) {
 export type PurchaseReportOrder = { orderId: string; orderNumber: string; lastReceivedAt: string; units: number; amount: string };
 
 export type PurchaseReport = {
-  /** Cost of everything received in the period (units x the order's unit cost). */
+  /** Cost of everything received in the period (units x the order's unit cost), plus GST paid on those bills. */
   total: string;
   units: number;
   /** Units received on lines with no cost typed, which the total can't include. */
@@ -425,10 +522,16 @@ export type PurchaseReport = {
  * were received (so a short or closed order only counts what came in).
  */
 export async function getPurchaseReport(range: { from: Date; to: Date }): Promise<PurchaseReport> {
-  const rows = await prisma.stockMovement.findMany({
-    where: { type: "STOCK_IN", purchaseOrderId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
-    select: { quantityChange: true, unitCost: true, createdAt: true, purchaseOrder: { select: { id: true, orderNumber: true } } },
-  });
+  const [rows, gstOrders] = await Promise.all([
+    prisma.stockMovement.findMany({
+      where: { type: "STOCK_IN", purchaseOrderId: { not: null }, createdAt: { gte: range.from, lte: range.to } },
+      select: { quantityChange: true, unitCost: true, createdAt: true, purchaseOrder: { select: { id: true, orderNumber: true } } },
+    }),
+    prisma.purchaseOrder.findMany({
+      where: { gstPaidAt: { gte: range.from, lte: range.to } },
+      select: { id: true, orderNumber: true, cgst: true, sgst: true, gstPaidAt: true },
+    }),
+  ]);
   const byOrder = new Map<string, { orderNumber: string; last: Date; units: number; paise: number }>();
   let total = 0;
   let units = 0;
@@ -443,6 +546,13 @@ export async function getPurchaseReport(range: { from: Date; to: Date }): Promis
     cur.units += r.quantityChange;
     cur.paise += paise;
     if (r.createdAt > cur.last) cur.last = r.createdAt;
+    byOrder.set(o.id, cur);
+  }
+  for (const o of gstOrders) {
+    const paise = orderGstPaise(o);
+    total += paise;
+    const cur = byOrder.get(o.id) ?? { orderNumber: o.orderNumber, last: o.gstPaidAt!, units: 0, paise: 0 };
+    cur.paise += paise;
     byOrder.set(o.id, cur);
   }
   const orders = [...byOrder.entries()]

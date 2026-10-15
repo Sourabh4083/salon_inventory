@@ -63,7 +63,7 @@ export function OrderCard({ order, role, currencySymbol }: { order: OrderDTO; ro
         ))}
       </ul>
 
-      {order.status === "ACTIVE" ? <OrderActions order={order} role={role} className="border-t px-4 py-3 sm:px-5" /> : null}
+      <OrderActions order={order} role={role} currencySymbol={currencySymbol} className="border-t px-4 py-3 sm:px-5" />
     </article>
   );
 }
