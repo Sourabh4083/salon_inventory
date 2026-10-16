@@ -7,7 +7,8 @@ import { SignJWT, jwtVerify } from "jose";
 import { SESSION_DURATION_SECONDS } from "@/lib/constants";
 import type { Role } from "@/generated/prisma/enums";
 
-export type SessionClaims = { userId: string; role: Role };
+/** sessionVersion must match User.sessionVersion; cookies issued before it existed count as 0. */
+export type SessionClaims = { userId: string; role: Role; sessionVersion: number };
 
 function getSecret() {
   const secret = process.env.SESSION_SECRET;
@@ -18,7 +19,7 @@ function getSecret() {
 }
 
 export async function createSessionToken(claims: SessionClaims) {
-  return new SignJWT({ sub: claims.userId, role: claims.role })
+  return new SignJWT({ sub: claims.userId, role: claims.role, sv: claims.sessionVersion })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DURATION_SECONDS}s`)
@@ -30,7 +31,8 @@ export async function verifySessionToken(token: string): Promise<SessionClaims |
     const { payload } = await jwtVerify(token, getSecret(), { algorithms: ["HS256"] });
     if (typeof payload.sub !== "string") return null;
     const role = payload.role === "OWNER" || payload.role === "MANAGER" ? payload.role : "MANAGER";
-    return { userId: payload.sub, role };
+    const sessionVersion = typeof payload.sv === "number" ? payload.sv : 0;
+    return { userId: payload.sub, role, sessionVersion };
   } catch {
     return null;
   }
