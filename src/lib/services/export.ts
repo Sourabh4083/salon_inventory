@@ -207,7 +207,7 @@ async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]
     { name: "Staff pay", rows: profit.staff.map((s) => ({ Employee: s.name, Days: s.days, "Days cut": s.cutDays, Amount: Number(s.amount) })) },
     {
       name: "Product purchases",
-      rows: purchases.orders.map((o) => ({ Order: o.orderNumber, "Last received": formatDate(o.lastReceivedAt), Units: o.units, Amount: Number(o.amount) })),
+      rows: purchases.orders.map((o) => ({ Order: o.orderNumber, Paid: formatDate(o.paidOn), Units: o.units, Amount: Number(o.amount) })),
     },
   ];
 }

@@ -274,6 +274,8 @@ export const orderCreateSchema = z.object({
   /** GST amounts from the supplier's bill; blank when the bill has no GST. */
   cgst: moneyInput,
   sgst: moneyInput,
+  /** How the order was paid for; the money leaves cash/bank when it is placed. */
+  paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
 });
 export type OrderCreateInput = z.input<typeof orderCreateSchema>;
 export type OrderCreateData = z.output<typeof orderCreateSchema>;
@@ -296,6 +298,7 @@ export const orderReceiveSchema = z.object({
     z.array(z.object({ itemId: z.string().min(1), quantity: quantityInput })).min(1),
   ]),
   /** How the shop paid for what arrived; its cost is taken from that account's balance. */
+  /** Only for orders placed before paying at order time; ignored on a prepaid order. */
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
   /** Owner only: GST from the bill that came with the delivery. Ignored once GST has been charged. */
   gst: z.object({ cgst: moneyInput, sgst: moneyInput }).optional(),

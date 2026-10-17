@@ -51,6 +51,7 @@ export default async function EditOrderPage({ params }: { params: Promise<{ id: 
           notes: order.notes ?? "",
           cgst: order.cgst ? trimMoney(order.cgst) : "",
           sgst: order.sgst ? trimMoney(order.sgst) : "",
+          paymentMethod: order.paymentMethod,
           lines: order.items
             .filter((i) => i.productId)
             .map((i) => ({ itemId: i.id, productId: i.productId!, name: i.name, inStock: i.inStock ?? 0, quantity: i.quantityOrdered, unitCost: i.unitCost ? trimMoney(i.unitCost) : "" })),

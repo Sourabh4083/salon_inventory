@@ -11,11 +11,10 @@ import { can } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 import { formatMoney } from "@/lib/format";
 import { fromPaise, toPaise, trimMoney } from "@/lib/money";
-import { GstInput } from "@/components/app/order-form";
+import { GstInput, PaidBy } from "@/components/app/order-form";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
-import { NativeSelect } from "@/components/app/native-select";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import {
@@ -32,19 +31,6 @@ import {
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 type Method = "CASH" | "UPI" | "CARD";
-
-/** How the shop paid for what arrived, so its cost comes off the right balance. */
-function PaidBy({ id, value, onChange }: { id: string; value: Method; onChange: (m: Method) => void }) {
-  return (
-    <Field label="Paid by" htmlFor={id}>
-      <NativeSelect id={id} className="h-11" value={value} onChange={(e) => onChange(e.target.value as Method)}>
-        <option value="CASH">Cash</option>
-        <option value="UPI">UPI</option>
-        <option value="CARD">Card / bank</option>
-      </NativeSelect>
-    </Field>
-  );
-}
 
 /**
  * The buttons on an active order: "Received" (everything arrived), "Some products
@@ -68,8 +54,9 @@ export function OrderActions({ order, role, currencySymbol, className }: { order
 
   const canReceive = can(role, "order.receive") && order.receivableLines > 0;
   const canEdit = canManage;
-  // GST is owner-only and charged once, so it can be typed until the first delivery.
-  const gst = role === "OWNER" && !order.gstPaid ? { currencySymbol } : null;
+  // GST is owner-only and charged once, so on an older order it can be typed until the
+  // first delivery. A prepaid order already paid it with the order.
+  const gst = role === "OWNER" && !order.gstPaid && !order.paidAt ? { currencySymbol } : null;
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2", className)}>
@@ -181,7 +168,7 @@ function ReceiveAllDialog({ order, gst, open, onOpenChange }: { order: OrderDTO;
           ))}
         </ul>
         {gst ? <GstFields id={`gst-all-${order.id}`} gst={gst} state={gstState} itemsPaise={lines.reduce((s, i) => s + linePaise(i, i.pending), 0)} /> : null}
-        <PaidBy id={`paid-all-${order.id}`} value={method} onChange={setMethod} />
+        {order.paidAt ? null : <PaidBy id={`paid-all-${order.id}`} value={method} onChange={setMethod} />}
         <AlertDialogFooter>
           <AlertDialogCancel disabled={pending}>Not yet</AlertDialogCancel>
           <AlertDialogAction onClick={confirm} disabled={pending}>
@@ -270,7 +257,7 @@ function PartialForm({ order, gst, close }: { order: OrderDTO; gst: GstProp; clo
         ))}
       </ul>
       {gst ? <GstFields id={`gst-part-${order.id}`} gst={gst} state={gstState} itemsPaise={parsed.reduce((s, p) => s + linePaise(p.item, Math.min(p.n, p.item.pending)), 0)} /> : null}
-      <PaidBy id={`paid-part-${order.id}`} value={method} onChange={setMethod} />
+      {order.paidAt ? null : <PaidBy id={`paid-part-${order.id}`} value={method} onChange={setMethod} />}
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
       <DialogFooter>
         <Button type="button" variant="outline" size="lg" className="h-11" onClick={close} disabled={pending}>

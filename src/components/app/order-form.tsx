@@ -6,6 +6,9 @@ import { toast } from "sonner";
 import { LoaderCircle, Minus, Plus, Trash2, Truck } from "lucide-react";
 import { createOrderAction, orderPickerProductsAction, updateOrderAction, updateOrderCostsAction } from "@/app/actions/orders";
 import type { ProductDTO } from "@/lib/services/products";
+import type { PaymentMethod } from "@/generated/prisma/enums";
+import { PAYMENT_LABEL } from "@/components/app/bill-badges";
+import { NativeSelect } from "@/components/app/native-select";
 import { formatMoney } from "@/lib/format";
 import { fromPaise, toPaise, trimMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
@@ -43,10 +46,13 @@ export function OrderForm({
   isOwner: boolean;
   /** Costs are owner-only; the manager orders by product and quantity alone. */
   showCost: boolean;
-  /** Present when editing an existing order. */
-  initial?: { orderId: string; orderNumber: string; notes: string; cgst: string; sgst: string; lines: OrderFormLine[] };
+  /** Present when editing an existing order. paymentMethod is null on an older order paid on delivery. */
+  initial?: { orderId: string; orderNumber: string; notes: string; cgst: string; sgst: string; paymentMethod: PaymentMethod | null; lines: OrderFormLine[] };
 }) {
   const router = useRouter();
+  // An older order is paid when it arrives, so it has nothing to choose here.
+  const paidOnOrder = !initial || initial.paymentMethod !== null;
+  const [method, setMethod] = useState<PaymentMethod>(initial?.paymentMethod ?? "CASH");
   const [lines, setLines] = useState<OrderFormLine[]>(initial?.lines ?? []);
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [cgst, setCgst] = useState(initial?.cgst ?? "");
@@ -94,6 +100,7 @@ export function OrderForm({
         notes,
         cgst: showCost ? cgst : "",
         sgst: showCost ? sgst : "",
+        paymentMethod: method,
       };
       const res = initial ? await updateOrderAction(initial.orderId, payload) : await createOrderAction(payload);
       if (!res.ok) {
@@ -102,7 +109,7 @@ export function OrderForm({
         return;
       }
       toast.success(initial ? `${res.data.orderNumber} updated` : `${res.data.orderNumber} placed`, {
-        description: "Click Received on the Orders page when the products arrive.",
+        description: `${paidOnOrder ? `Paid by ${PAYMENT_LABEL[method]}. ` : ""}Click Received on the Orders page when the products arrive.`,
       });
       router.push("/orders");
     });
@@ -184,12 +191,23 @@ export function OrderForm({
         <section className="rounded-2xl border bg-card p-4 shadow-xs sm:p-5">
           <h2 className="font-heading text-lg">GST on the bill</h2>
           <p className="mb-3 text-sm text-muted-foreground">
-            {costsOnly ? "Leave blank if the bill has no GST. It counts as paid with the first delivery." : "Leave blank if the bill has no GST. You can also fill this in when the products arrive."}
+            {paidOnOrder
+              ? "Leave blank if the bill has no GST. It is paid with the order."
+              : costsOnly
+                ? "Leave blank if the bill has no GST. It counts as paid with the first delivery."
+                : "Leave blank if the bill has no GST. You can also fill this in when the products arrive."}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <GstInput id="order-cgst" label="CGST" value={cgst} onChange={setCgst} currencySymbol={currencySymbol} />
             <GstInput id="order-sgst" label="SGST" value={sgst} onChange={setSgst} currencySymbol={currencySymbol} />
           </div>
+        </section>
+      ) : null}
+
+      {paidOnOrder && !costsOnly ? (
+        <section className="rounded-2xl border bg-card p-4 shadow-xs sm:p-5">
+          <PaidBy id="order-paid-by" value={method} onChange={setMethod} />
+          <p className="mt-2 text-sm text-muted-foreground">The order is paid for now, so the amount comes off {method === "CASH" ? "Cash" : "Bank"} today.</p>
         </section>
       ) : null}
 
@@ -256,6 +274,19 @@ export function OrderForm({
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+/** How the shop paid for an order, so its cost comes off the right balance. */
+export function PaidBy({ id, value, onChange }: { id: string; value: PaymentMethod; onChange: (m: PaymentMethod) => void }) {
+  return (
+    <Field label="Paid by" htmlFor={id}>
+      <NativeSelect id={id} className="h-11" value={value} onChange={(e) => onChange(e.target.value as PaymentMethod)}>
+        <option value="CASH">Cash</option>
+        <option value="UPI">UPI</option>
+        <option value="CARD">Card / bank</option>
+      </NativeSelect>
+    </Field>
   );
 }
 

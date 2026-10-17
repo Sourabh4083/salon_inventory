@@ -256,7 +256,7 @@ export function SpentView({ p, sym, expenses, purchases, expensesHref }: { p: Pr
         </Panel>
       </div>
 
-      <Panel title="Stock bought" icon={Truck} total={money(purchases.total)} note="Not counted in profit — this stock is on your shelf until it is sold. Counted on the day the goods arrived, at the order's cost price.">
+      <Panel title="Stock bought" icon={Truck} total={money(purchases.total)} note="Not counted in profit — this stock is on your shelf until it is sold. Counted on the day it was paid for (when ordered), at the order's cost price.">
         {purchases.orders.length === 0 ? (
           <Empty>No order deliveries in this period.</Empty>
         ) : (
@@ -266,7 +266,7 @@ export function SpentView({ p, sym, expenses, purchases, expensesHref }: { p: Pr
                 <Link href={`/orders/${o.orderId}`} className="font-medium hover:underline">
                   {o.orderNumber}
                 </Link>
-                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Received {formatDate(o.lastReceivedAt)}</span>
+                <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">Paid {formatDate(o.paidOn)}</span>
                 <span className="text-xs text-muted-foreground tabular-nums">× {formatNumber(o.units)}</span>
                 <span className="w-24 text-right font-medium tabular-nums">{money(o.amount)}</span>
               </li>

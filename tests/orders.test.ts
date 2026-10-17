@@ -22,6 +22,11 @@ function receive(orderId: string, lines: "ALL" | { itemId: string; quantity: num
   return orderReceiveSchema.parse({ orderId, lines });
 }
 
+/** Turns a fresh order into one placed before paying at order time: paid on each delivery. */
+function asOlderOrder(orderId: string) {
+  return prisma.purchaseOrder.update({ where: { id: orderId }, data: { paidAt: null, paymentMethod: null, gstPaidAt: null, gstPaymentMethod: null } });
+}
+
 beforeAll(async () => {
   const s = await seedBasics();
   owner = s.owner;
@@ -65,6 +70,9 @@ describe("placing an order", () => {
     // The line carries the owner's saved cost price, and the manager never gets it back.
     expect(o.items[0].unitCost).toBe("90.00");
     expect(orderForViewer(o, "MANAGER").items[0].unitCost).toBeNull();
+    // Paid for at that cost price, the way the manager chose.
+    const paid = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 2 }], paymentMethod: "UPI" }), manager);
+    expect([paid.paymentMethod, paid.totalCost]).toEqual(["UPI", "180.00"]);
     await expect(updateOrder(o.id, order([{ productId: p.id, quantity: 5 }]), manager)).rejects.toThrow(/owner/i);
   });
 
@@ -210,7 +218,36 @@ describe("reading", () => {
 });
 
 describe("purchase report", () => {
-  it("adds up what arrived in the period at the order's cost, per order", async () => {
+  it("counts the whole order on the day it was placed and paid for", async () => {
+    const start = new Date();
+    const costed = await product("Paid Costed", { costPrice: "100" });
+    const typed = await product("Paid Typed");
+    const free = await product("Paid No Cost");
+    const o = await createOrder(
+      order([
+        { productId: costed.id, quantity: 5 },
+        { productId: typed.id, quantity: 4, unitCost: "120" },
+        { productId: free.id, quantity: 3 },
+      ]),
+      owner,
+    );
+    expect([o.paymentMethod, o.paidAt !== null]).toEqual(["CASH", true]);
+    const placed = await getPurchaseReport({ from: start, to: new Date() });
+    expect(placed.orders.find((x) => x.orderId === o.id)).toMatchObject({ units: 12, amount: "980.00" });
+
+    // Receiving, even short, and closing don't change what was paid.
+    await receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 5 }, { itemId: o.items[1].id, quantity: 2 }, { itemId: o.items[2].id, quantity: 3 }]), manager);
+    await closeOrder({ orderId: o.id, reason: "Rest not coming" }, owner);
+    const report = await getPurchaseReport({ from: start, to: new Date() });
+    expect(report.total).toBe("980.00");
+    expect(report.units).toBe(12);
+    expect(report.uncostedUnits).toBe(3);
+    expect(report.orders).toEqual([expect.objectContaining({ orderId: o.id, units: 12, amount: "980.00" })]);
+    const receipts = await prisma.stockMovement.findMany({ where: { purchaseOrderId: o.id } });
+    expect(receipts.every((m) => m.paymentMethod === null)).toBe(true);
+  });
+
+  it("an older order adds up what arrived in the period at the order's cost", async () => {
     const start = new Date();
     const costed = await product("Spend Costed", { costPrice: "100" });
     const typed = await product("Spend Typed");
@@ -223,6 +260,7 @@ describe("purchase report", () => {
       ]),
       owner,
     );
+    await asOlderOrder(o.id);
     await receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 5 }, { itemId: o.items[1].id, quantity: 2 }, { itemId: o.items[2].id, quantity: 3 }]), manager);
     // What was never received doesn't count once the order is closed.
     await closeOrder({ orderId: o.id, reason: "Rest not coming" }, owner);
@@ -239,16 +277,21 @@ describe("purchase report", () => {
 });
 
 describe("GST on the supplier's bill", () => {
-  it("adds CGST and SGST to the order total; blank means no GST", async () => {
+  it("adds CGST and SGST to the order total and pays them with the order; blank means no GST", async () => {
     const p = await product("Gst Shampoo");
-    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 2, unitCost: "500" }], cgst: "90", sgst: "90" }), owner);
-    expect([o.cgst, o.sgst, o.totalCost, o.gstPaid]).toEqual(["90.00", "90.00", "1180.00", false]);
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 2, unitCost: "500" }], cgst: "90", sgst: "90", paymentMethod: "UPI" }), owner);
+    expect([o.cgst, o.sgst, o.totalCost, o.gstPaid]).toEqual(["90.00", "90.00", "1180.00", true]);
+    const row = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: o.id } });
+    expect([row.gstPaymentMethod, row.gstPaidAt?.getTime()]).toEqual(["UPI", row.paidAt?.getTime()]);
 
     const plain = await createOrder(orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1, unitCost: "500" }], cgst: "", sgst: "" }), owner);
-    expect([plain.cgst, plain.sgst, plain.totalCost]).toEqual([null, null, "500.00"]);
+    expect([plain.cgst, plain.sgst, plain.totalCost, plain.gstPaid]).toEqual([null, null, "500.00", false]);
 
-    const edited = await updateOrder(plain.id, orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1, unitCost: "500" }], cgst: "45", sgst: "45" }), owner);
-    expect(edited.totalCost).toBe("590.00");
+    // Editing before delivery changes what was paid, and how.
+    const edited = await updateOrder(plain.id, orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1, unitCost: "500" }], cgst: "45", sgst: "45", paymentMethod: "CARD" }), owner);
+    expect([edited.totalCost, edited.gstPaid, edited.paymentMethod]).toEqual(["590.00", true, "CARD"]);
+    const editedRow = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: plain.id } });
+    expect(editedRow.gstPaymentMethod).toBe("CARD");
   });
 
   it("ignores GST typed by a manager and hides it from them", async () => {
@@ -263,11 +306,12 @@ describe("GST on the supplier's bill", () => {
     expect([done.cgst, done.sgst, done.gstPaid]).toEqual(["9.00", "9.00", true]);
   });
 
-  it("charges GST once, on the first delivery, and lets the owner type it from the bill then", async () => {
+  it("on an older order, charges GST once, on the first delivery, and lets the owner type it from the bill then", async () => {
     const start = new Date();
     const a = await product("Gst Part A");
     const b = await product("Gst Part B");
     const o = await createOrder(order([{ productId: a.id, quantity: 2, unitCost: "100" }, { productId: b.id, quantity: 1, unitCost: "300" }]), owner);
+    await asOlderOrder(o.id);
 
     const first = await receiveOrder(
       orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: o.items[0].id, quantity: 2 }], paymentMethod: "UPI", gst: { cgst: "45", sgst: "45" } }),
@@ -289,10 +333,28 @@ describe("GST on the supplier's bill", () => {
 describe("fixing the amounts on a received order", () => {
   const costs = (items: { itemId: string; unitCost: string }[], extra: Record<string, unknown> = {}) => orderCostsSchema.parse({ items, ...extra });
 
-  it("changes cost per unit and GST everywhere, without touching stock", async () => {
+  it("on a prepaid order, changes what was paid; GST added later is paid with the order", async () => {
+    const start = new Date();
+    const a = await product("Fix Paid", { costPrice: "100" });
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: a.id, quantity: 3, unitCost: "100" }], paymentMethod: "UPI" }), owner);
+    await receiveOrder(receive(o.id, "ALL"), owner);
+
+    const fixed = await updateOrderCosts(o.id, costs([{ itemId: o.items[0].id, unitCost: "120" }], { cgst: "32.40", sgst: "32.40" }), owner);
+    expect([fixed.totalCost, fixed.gstPaid]).toEqual(["424.80", true]);
+    const row = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: o.id } });
+    expect([row.gstPaymentMethod, row.gstPaidAt?.getTime()]).toEqual(["UPI", row.paidAt?.getTime()]);
+    const report = await getPurchaseReport({ from: start, to: new Date() });
+    expect(report.orders.find((x) => x.orderId === o.id)?.amount).toBe("424.80");
+
+    const noGst = await updateOrderCosts(o.id, costs([], { cgst: "", sgst: "" }), owner);
+    expect([noGst.totalCost, noGst.gstPaid]).toEqual(["360.00", false]);
+  });
+
+  it("on an older order, changes cost per unit and GST everywhere, without touching stock", async () => {
     const start = new Date();
     const a = await product("Fix A", { costPrice: "100" });
     const o = await createOrder(order([{ productId: a.id, quantity: 3, unitCost: "100" }]), owner);
+    await asOlderOrder(o.id);
     await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "UPI" }), owner);
 
     const fixed = await updateOrderCosts(o.id, costs([{ itemId: o.items[0].id, unitCost: "120" }], { cgst: "32.40", sgst: "32.40", notes: "Bill 778" }), owner);

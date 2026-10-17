@@ -59,6 +59,9 @@ const employee = () => createEmployee(employeeSchema.parse({ name: "Sunita", mon
 const product = (name: string, overrides: Record<string, unknown> = {}) => createProduct(productCreateSchema.parse({ name, categoryId, startingQuantity: 0, ...overrides }), owner);
 /** Entries are counted once they are typed in after the balance was set. */
 const tick = () => new Promise((r) => setTimeout(r, 15));
+/** An order placed before paying at order time: paid on each delivery. */
+const asOlderOrder = (orderId: string) =>
+  prisma.purchaseOrder.update({ where: { id: orderId }, data: { paidAt: null, paymentMethod: null, gstPaidAt: null, gstPaymentMethod: null } });
 
 describe("money in and out for a period", () => {
   it("takes an expense from the account it was paid from", async () => {
@@ -105,10 +108,35 @@ describe("money in and out for a period", () => {
     expect(m.total.out).toBe("15000.00");
   });
 
-  it("takes received stock from the account chosen on receipt, at the order's cost", async () => {
+  it("takes an order from the account it was paid from when it is placed, and not again on receipt", async () => {
+    const glue = await product("Glue");
+    const tape = await product("Tape");
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 4, unitCost: "120" }, { productId: tape.id, quantity: 6 }], paymentMethod: "UPI" }), owner);
+
+    const placed = await getMoneyMovement(today());
+    expect([placed.bank.stock, placed.cash.stock]).toEqual(["480.00", "0.00"]); // the tape has no cost price
+
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "CASH" }), manager);
+    const received = await getMoneyMovement(today());
+    expect([received.bank.stock, received.cash.stock]).toEqual(["480.00", "0.00"]);
+  });
+
+  it("pays the bill's GST with the order, in the same passbook line", async () => {
+    const glue = await product("Glue");
+    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 2, unitCost: "100" }], cgst: "18", sgst: "18", paymentMethod: "UPI" }), owner);
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL" }), manager);
+
+    const m = await getMoneyMovement(today());
+    expect([m.bank.stock, m.cash.stock]).toEqual(["236.00", "0.00"]);
+    const { items } = await listMoneyEntries(today());
+    expect(items.filter((i) => i.label === `Stock · ${o.orderNumber}`).map((i) => [i.account, i.amount])).toEqual([["bank", "-236.00"]]);
+  });
+
+  it("an older order: takes received stock from the account chosen on receipt, at the order's cost", async () => {
     const glue = await product("Glue");
     const tape = await product("Tape");
     const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 4, unitCost: "120" }, { productId: tape.id, quantity: 6 }] }), owner);
+    await asOlderOrder(o.id);
     const glueLine = o.items.find((i) => i.productId === glue.id)!;
 
     await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: glueLine.id, quantity: 1 }], paymentMethod: "UPI" }), manager);
@@ -122,9 +150,10 @@ describe("money in and out for a period", () => {
     expect(await prisma.stockMovement.count({ where: { paymentMethod: null, type: "STOCK_IN" } })).toBe(1);
   });
 
-  it("takes the bill's GST from the account chosen on the first delivery, in the same passbook line", async () => {
+  it("an older order: takes the bill's GST from the account chosen on the first delivery, in the same passbook line", async () => {
     const glue = await product("Glue");
     const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 2, unitCost: "100" }], cgst: "18", sgst: "18" }), owner);
+    await asOlderOrder(o.id);
     await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: o.items[0].id, quantity: 1 }], paymentMethod: "UPI" }), manager);
     await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "CASH" }), manager);
 
@@ -140,15 +169,18 @@ describe("money in and out for a period", () => {
     );
   });
 
-  it("lists every entry in the passbook, newest first, one line per delivery", async () => {
+  it("lists every entry in the passbook, newest first, one line per order", async () => {
     const e = await employee();
     const glue = await product("Glue");
     const tape = await product("Tape");
     const bill = await serviceBill("500", { paymentMethod: "CARD", customerName: "Ravi" });
     await expense("120", "UPI");
     await recordAdvance(advanceSchema.parse({ employeeId: e.id, amount: "200" }), manager);
-    const o = await createOrder(orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 2, unitCost: "100" }, { productId: tape.id, quantity: 1, unitCost: "50" }] }), owner);
-    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL", paymentMethod: "CARD" }), manager);
+    const o = await createOrder(
+      orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 2, unitCost: "100" }, { productId: tape.id, quantity: 1, unitCost: "50" }], paymentMethod: "CARD" }),
+      owner,
+    );
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: "ALL" }), manager);
     await expense("999", "CASH", { spentOn: toDateParam(addDaysInZone(new Date(), -3)) });
 
     const { items, more } = await listMoneyEntries(today());
