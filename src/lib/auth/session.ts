@@ -13,8 +13,8 @@ export type SessionUser = {
   role: Role;
 };
 
-export async function setSessionCookie(user: { id: string; role: Role }) {
-  const token = await createSessionToken({ userId: user.id, role: user.role });
+export async function setSessionCookie(user: { id: string; role: Role; sessionVersion: number }) {
+  const token = await createSessionToken({ userId: user.id, role: user.role, sessionVersion: user.sessionVersion });
   const store = await cookies();
   store.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -32,7 +32,8 @@ export async function clearSessionCookie() {
 
 /**
  * Resolves the logged-in user from the session cookie, re-checking the database
- * so disabled accounts (or changed roles) take effect immediately. Cached per request.
+ * so disabled accounts, changed roles and password resets (which sign out every
+ * device) take effect immediately. Cached per request.
  */
 export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   const store = await cookies();
@@ -42,8 +43,8 @@ export const getCurrentUser = cache(async (): Promise<SessionUser | null> => {
   if (!claims) return null;
   const user = await prisma.user.findUnique({
     where: { id: claims.userId },
-    select: { id: true, name: true, email: true, role: true, isActive: true },
+    select: { id: true, name: true, email: true, role: true, isActive: true, sessionVersion: true },
   });
-  if (!user || !user.isActive) return null;
+  if (!user || !user.isActive || user.sessionVersion !== claims.sessionVersion) return null;
   return { id: user.id, name: user.name, email: user.email, role: user.role };
 });

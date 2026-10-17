@@ -2,6 +2,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { authenticate, createManager, updateManager, resetManagerPassword } from "@/lib/services/users";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { prisma } from "@/lib/db";
+import { createSessionToken, verifySessionToken } from "@/lib/auth/token";
+import { SignJWT } from "jose";
 import { seedBasics, OWNER_PASSWORD, MANAGER_PASSWORD } from "./helpers";
 import type { SessionUser } from "@/lib/auth/session";
 
@@ -60,6 +62,28 @@ describe("owner manages managers", () => {
     await resetManagerPassword({ userId: m.id, password: "NewPass#456" }, owner);
     expect(await authenticate("reset@test.local", "OldPass#123")).toBeNull();
     expect((await authenticate("reset@test.local", "NewPass#456"))?.id).toBe(m.id);
+  });
+
+  it("a password reset signs the manager out of devices already logged in", async () => {
+    const m = await createManager({ name: "Fired", email: "fired@test.local", password: "OldPass#123" }, owner);
+    const before = await authenticate("fired@test.local", "OldPass#123");
+    const oldToken = await createSessionToken({ userId: m.id, role: "MANAGER", sessionVersion: before!.sessionVersion });
+
+    await resetManagerPassword({ userId: m.id, password: "NewPass#456" }, owner);
+
+    const claims = await verifySessionToken(oldToken);
+    const row = await prisma.user.findUniqueOrThrow({ where: { id: m.id } });
+    expect(claims!.sessionVersion).not.toBe(row.sessionVersion);
+    // A fresh login gets the new version.
+    expect((await authenticate("fired@test.local", "NewPass#456"))?.sessionVersion).toBe(row.sessionVersion);
+  });
+
+  it("treats login cookies issued before session versions existed as version 0", async () => {
+    const legacy = await new SignJWT({ sub: "someone", role: "MANAGER" })
+      .setProtectedHeader({ alg: "HS256" })
+      .setExpirationTime("1h")
+      .sign(new TextEncoder().encode(process.env.SESSION_SECRET!));
+    expect((await verifySessionToken(legacy))?.sessionVersion).toBe(0);
   });
 
   it("cannot modify the owner account through manager management", async () => {

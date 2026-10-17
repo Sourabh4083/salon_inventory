@@ -9,6 +9,7 @@ import { formatDateTime, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/app/page-header";
 import { OrderStatusBadge } from "@/components/app/order-badges";
 import { OrderActions } from "@/components/app/order-actions";
+import { PAYMENT_LABEL } from "@/components/app/bill-badges";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -34,6 +35,7 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           description={
             <span className="flex flex-wrap items-center gap-2">
               Ordered {formatDateTime(order.createdAt)} by {order.createdByName}
+              {order.paymentMethod ? ` · Paid by ${PAYMENT_LABEL[order.paymentMethod]}` : ""}
               <OrderStatusBadge status={order.status} partly={order.totalReceived > 0} />
             </span>
           }

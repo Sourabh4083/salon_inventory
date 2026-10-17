@@ -22,7 +22,10 @@ function toDTO(u: Prisma.UserGetPayload<{ select: typeof select }>): UserDTO {
   return { ...u, createdAt: u.createdAt.toISOString(), updatedAt: u.updatedAt.toISOString() };
 }
 
-export async function authenticate(email: string, password: string): Promise<SessionUser | null> {
+export async function authenticate(
+  email: string,
+  password: string,
+): Promise<(SessionUser & { sessionVersion: number }) | null> {
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (!user) return null;
   const ok = await verifyPassword(user.passwordHash, password);
@@ -35,7 +38,7 @@ export async function authenticate(email: string, password: string): Promise<Ses
     summary: `${user.name} signed in`,
     actorId: user.id,
   });
-  return { id: user.id, name: user.name, email: user.email, role: user.role };
+  return { id: user.id, name: user.name, email: user.email, role: user.role, sessionVersion: user.sessionVersion };
 }
 
 export async function listUsers(): Promise<UserDTO[]> {
@@ -101,21 +104,31 @@ export async function updateManager(
   return toDTO(user);
 }
 
+/**
+ * Sets a new password and signs the account out on every device (any login cookie
+ * issued before the reset stops working). Returns the new session version so the
+ * caller can re-issue its own cookie when someone resets their own password.
+ */
 export async function resetManagerPassword(input: { userId: string; password: string }, actor: SessionUser) {
   const passwordHash = await hashPassword(input.password);
-  await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     const existing = await tx.user.findUnique({ where: { id: input.userId } });
     if (!existing) throw new AppError("User not found.", "NOT_FOUND");
     if (existing.role === "OWNER" && existing.id !== actor.id) {
       throw new AppError("Owner accounts cannot be modified here.", "FORBIDDEN");
     }
-    await tx.user.update({ where: { id: input.userId }, data: { passwordHash } });
+    const updated = await tx.user.update({
+      where: { id: input.userId },
+      data: { passwordHash, sessionVersion: { increment: 1 } },
+      select: { id: true, role: true, sessionVersion: true },
+    });
     await recordAudit(tx, {
       action: "USER_PASSWORD_RESET",
       entityType: "User",
       entityId: existing.id,
-      summary: `Reset password for ${existing.name}`,
+      summary: `Reset password for ${existing.name} and signed them out everywhere`,
       actorId: actor.id,
     });
+    return updated;
   });
 }

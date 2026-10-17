@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requirePermission } from "@/lib/auth/guards";
+import { setSessionCookie } from "@/lib/auth/session";
 import { toActionError, type ActionResult } from "@/lib/errors";
 import { createManagerSchema, fieldErrors, resetPasswordSchema, updateManagerSchema } from "@/lib/validation/schemas";
 import { createManager, resetManagerPassword, updateManager, type UserDTO } from "@/lib/services/users";
@@ -37,7 +38,9 @@ export async function resetManagerPasswordAction(input: { userId: string; passwo
     const user = await requirePermission("user.manage");
     const parsed = resetPasswordSchema.safeParse(input);
     if (!parsed.success) return { ok: false, error: "Please fix the highlighted fields.", fieldErrors: fieldErrors(parsed.error) };
-    await resetManagerPassword(parsed.data, user);
+    const reset = await resetManagerPassword(parsed.data, user);
+    // Resetting your own password signs out every device, including this one; keep this one signed in.
+    if (reset.id === user.id) await setSessionCookie(reset);
     revalidatePath("/users");
     return { ok: true, data: undefined };
   } catch (err) {
