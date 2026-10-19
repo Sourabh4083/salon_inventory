@@ -14,7 +14,8 @@ import type { BalancesData, CashDepositData, OwnerWithdrawalData } from "@/lib/v
  * Where the shop's money is. Two accounts: the cash drawer (Cash) and the bank (UPI and
  * Card). Money received from customers adds to an account; expenses, salaries, advances
  * and stock paid for when ordered (older orders: on receipt) take from it, and so does money an owner takes for
- * themselves. Cash the owner carries to the bank moves from one account to the other. The owner counts both once, and the running balances
+ * themselves. Cash the owner carries to the bank moves from one account to the other; it changes the balances
+ * but is not money made or spent, so it stays out of "change". The owner counts both once, and the running balances
  * follow every entry made after that.
  */
 
@@ -36,7 +37,7 @@ export type AccountMovement = {
   out: string;
   /** Cash carried to the bank: minus on cash, plus on bank, nothing on the total. */
   moved: string;
-  /** received − out + moved */
+  /** received − out. Cash moved to the bank is left out: the shop neither made nor spent it. */
   change: string;
 };
 
@@ -72,7 +73,7 @@ function toMovement(l: Lines): AccountMovement {
     taken: fromPaise(l.taken),
     out: fromPaise(out),
     moved: fromPaise(l.moved),
-    change: fromPaise(l.received - out + l.moved),
+    change: fromPaise(l.received - out),
   };
 }
 
@@ -126,8 +127,8 @@ export async function getBalances(): Promise<Balances | null> {
   const m = await movement({ from: startOfDay(row.openingAt), recordedAfter: row.openingAt });
   const openingCash = toPaise(row.openingCash?.toString());
   const openingBank = toPaise(row.openingBank?.toString());
-  const cash = openingCash + toPaise(m.cash.change);
-  const bank = openingBank + toPaise(m.bank.change);
+  const cash = openingCash + toPaise(m.cash.change) + toPaise(m.cash.moved);
+  const bank = openingBank + toPaise(m.bank.change) + toPaise(m.bank.moved);
   return {
     cash: fromPaise(cash),
     bank: fromPaise(bank),

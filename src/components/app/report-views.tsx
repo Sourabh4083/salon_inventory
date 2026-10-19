@@ -377,19 +377,19 @@ export function MoneyView({
                   ))}
                 </tr>
               ))}
-              <tr>
-                <td className="py-2.5">Cash moved to bank</td>
-                {accounts.map((a) => (
-                  <td key={a} className="py-2.5 pl-3 text-right tabular-nums">
-                    {money(movement[a].moved)}
-                  </td>
-                ))}
-              </tr>
               <tr className="font-semibold">
                 <td className="py-3">= Change</td>
                 {accounts.map((a) => (
                   <td key={a} className={cn("py-3 pl-3 text-right tabular-nums", tone(movement[a].change))}>
                     {money(movement[a].change)}
+                  </td>
+                ))}
+              </tr>
+              <tr className="text-muted-foreground">
+                <td className="py-2.5">Cash moved to bank (not counted in Change)</td>
+                {accounts.map((a) => (
+                  <td key={a} className="py-2.5 pl-3 text-right tabular-nums">
+                    {money(movement[a].moved)}
                   </td>
                 ))}
               </tr>

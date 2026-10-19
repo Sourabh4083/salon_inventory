@@ -186,6 +186,7 @@ async function salesReportSheets(p: Params, actor: SessionUser): Promise<Sheet[]
         moneyLine("Stock bought", "stock"),
         moneyLine("Taken by owners", "taken"),
         moneyLine("Change (received − paid out)", "change"),
+        moneyLine("Cash moved to bank (not counted in Change)", "moved"),
       ],
     },
     {
