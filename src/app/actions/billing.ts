@@ -18,6 +18,8 @@ import {
   type ServiceInput,
 } from "@/lib/validation/schemas";
 import { discardOpenBill, saveOpenBill, type OpenBillDTO } from "@/lib/services/open-bills";
+import { getCustomerHistory, searchCustomers, type CustomerHistoryDTO, type CustomerSuggestionDTO } from "@/lib/services/customers";
+import { phoneKey } from "@/lib/phone";
 import {
   addBillPayment,
   cancelBill,
@@ -141,6 +143,25 @@ export async function listActiveServicesAction(): Promise<ActionResult<ServiceDT
   try {
     await requirePermission("bill.create");
     return { ok: true, data: await listServices({ activeOnly: true }) };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function searchCustomersAction(query: string): Promise<ActionResult<CustomerSuggestionDTO[]>> {
+  try {
+    await requirePermission("bill.create");
+    return { ok: true, data: await searchCustomers(String(query ?? "").slice(0, 120)) };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function customerHistoryAction(phone: string): Promise<ActionResult<CustomerHistoryDTO | null>> {
+  try {
+    await requirePermission("bill.create");
+    const key = phoneKey(String(phone ?? ""));
+    return { ok: true, data: key ? await getCustomerHistory(key) : null };
   } catch (err) {
     return toActionError(err);
   }

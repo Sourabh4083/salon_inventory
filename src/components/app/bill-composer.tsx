@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
 import { NativeSelect } from "@/components/app/native-select";
 import { StockBadge } from "@/components/app/stock-badge";
+import { CustomerFields } from "@/components/app/customer-fields";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -452,14 +453,15 @@ export function BillComposer({
             </Field>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Customer name" htmlFor="bill-customer" error={errors.customerName}>
-              <Input id="bill-customer" className="h-11" value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder={payLater ? "Required" : "Optional"} maxLength={120} aria-invalid={Boolean(errors.customerName)} />
-            </Field>
-            <Field label="Phone" htmlFor="bill-phone" error={errors.customerPhone}>
-              <Input id="bill-phone" className="h-11" inputMode="tel" value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder={payLater ? "Required" : "Optional"} maxLength={20} aria-invalid={Boolean(errors.customerPhone)} />
-            </Field>
-          </div>
+          <CustomerFields
+            name={customerName}
+            phone={customerPhone}
+            onNameChange={setCustomerName}
+            onPhoneChange={setCustomerPhone}
+            errors={errors}
+            required={payLater}
+            currencySymbol={currencySymbol}
+          />
 
           {edit ? (
             <Field label="Bill date & time" htmlFor="bill-date" error={errors.billedAt}>

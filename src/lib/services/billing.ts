@@ -12,6 +12,7 @@ import { endOfDay, startOfDay } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import type { BillCreateData, BillPaymentData, BillUpdateData } from "@/lib/validation/schemas";
 import { PAGE_SIZE } from "@/lib/constants";
+import { phoneKey } from "@/lib/phone";
 
 /* ---------- DTOs ---------- */
 
@@ -248,6 +249,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
         billNumber: await nextBillNumber(tx),
         customerName: data.customerName,
         customerPhone: data.customerPhone,
+        customerPhoneKey: phoneKey(data.customerPhone),
         subtotal: fromPaise(subtotal),
         discount: fromPaise(discount),
         total: fromPaise(total),
@@ -332,6 +334,9 @@ export async function listBills(params: ListBillsParams = {}) {
       { customerPhone: { contains: search } },
       { items: { some: { name: { contains: search, mode: "insensitive" } } } },
     ];
+    // A phone typed in any format ("98765 43210", "+91...") finds the customer's bills.
+    const digits = search.replace(/\D/g, "");
+    if (/^[0-9+\-\s()]+$/.test(search) && digits.length >= 3) where.OR = [...where.OR, { customerPhoneKey: { contains: digits.slice(-10) } }];
   }
   const [rows, total] = await Promise.all([
     prisma.bill.findMany({ where, orderBy: { createdAt: params.unpaid ? "asc" : "desc" }, include: billInclude, skip: (page - 1) * pageSize, take: pageSize }),
@@ -602,6 +607,7 @@ export async function updateBill(data: BillUpdateData, actor: SessionUser): Prom
       data: {
         customerName: data.customerName,
         customerPhone: data.customerPhone,
+        customerPhoneKey: phoneKey(data.customerPhone),
         subtotal: fromPaise(subtotal),
         discount: fromPaise(discount),
         total: fromPaise(total),
