@@ -10,6 +10,7 @@ import { getProfitReport } from "@/lib/services/profit";
 import { getBalances } from "@/lib/services/cashbook";
 import { countActiveOrders } from "@/lib/services/orders";
 import { resolveRange } from "@/lib/dates";
+import { zonedParts } from "@/lib/timezone";
 import { can } from "@/lib/permissions";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { toPaise } from "@/lib/money";
@@ -23,7 +24,7 @@ import { cn } from "@/lib/utils";
 export const metadata: Metadata = { title: "Dashboard" };
 
 function greeting() {
-  const h = new Date().getHours();
+  const h = zonedParts(new Date()).hour;
   return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
 }
 

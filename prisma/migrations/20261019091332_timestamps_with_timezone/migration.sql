@@ -1,0 +1,100 @@
+-- Prisma has always written these naive columns as UTC wall clock (adapter-pg formats
+-- Dates with getUTC*), so each existing value is read back as UTC. The USING clause
+-- says so explicitly instead of relying on the session's TimeZone setting.
+--
+-- adapter-pg still sends Dates as offset-less UTC text, which a timestamptz column
+-- reads in the session's TimeZone, so every session must run in UTC. Set it as the
+-- database default: poolers like Supavisor drop per-connection startup options.
+DO $$ BEGIN EXECUTE format('ALTER DATABASE %I SET timezone TO %L', current_database(), 'UTC'); END $$;
+SET timezone TO 'UTC';
+
+-- AlterTable
+ALTER TABLE "Attendance" ALTER COLUMN "date" SET DATA TYPE TIMESTAMPTZ(3) USING "date" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "AuditLog" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Bill" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "cancelledAt" SET DATA TYPE TIMESTAMPTZ(3) USING "cancelledAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "editedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "editedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "BillPayment" ALTER COLUMN "paidAt" SET DATA TYPE TIMESTAMPTZ(3) USING "paidAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "BusinessSettings" ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "openingAt" SET DATA TYPE TIMESTAMPTZ(3) USING "openingAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "CashDeposit" ALTER COLUMN "movedOn" SET DATA TYPE TIMESTAMPTZ(3) USING "movedOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Category" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Employee" ALTER COLUMN "joinedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "joinedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "leftAt" SET DATA TYPE TIMESTAMPTZ(3) USING "leftAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "EmployeeAdvance" ALTER COLUMN "takenOn" SET DATA TYPE TIMESTAMPTZ(3) USING "takenOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "EmployeeDocument" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Enquiry" ALTER COLUMN "nextCallOn" SET DATA TYPE TIMESTAMPTZ(3) USING "nextCallOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "comingOn" SET DATA TYPE TIMESTAMPTZ(3) USING "comingOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "visitedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "visitedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "EnquiryCall" ALTER COLUMN "followUpOn" SET DATA TYPE TIMESTAMPTZ(3) USING "followUpOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "calledAt" SET DATA TYPE TIMESTAMPTZ(3) USING "calledAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Expense" ALTER COLUMN "spentOn" SET DATA TYPE TIMESTAMPTZ(3) USING "spentOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "OpenBill" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "OwnerWithdrawal" ALTER COLUMN "takenOn" SET DATA TYPE TIMESTAMPTZ(3) USING "takenOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Product" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "PurchaseOrder" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "closedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "closedAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "gstPaidAt" SET DATA TYPE TIMESTAMPTZ(3) USING "gstPaidAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "paidAt" SET DATA TYPE TIMESTAMPTZ(3) USING "paidAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "SalaryPayment" ALTER COLUMN "paidOn" SET DATA TYPE TIMESTAMPTZ(3) USING "paidOn" AT TIME ZONE 'UTC',
+ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "Service" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "StockMovement" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC';
+
+-- AlterTable
+ALTER TABLE "User" ALTER COLUMN "createdAt" SET DATA TYPE TIMESTAMPTZ(3) USING "createdAt" AT TIME ZONE 'UTC',
+ALTER COLUMN "updatedAt" SET DATA TYPE TIMESTAMPTZ(3) USING "updatedAt" AT TIME ZONE 'UTC';

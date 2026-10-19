@@ -9,6 +9,7 @@ import { absenceCutAction } from "@/app/actions/attendance";
 import type { EmployeeDTO, SalaryPaymentDTO } from "@/lib/services/employees";
 import { formatMonth, isMonthParam, toDateParam, toMonthParam } from "@/lib/dates";
 import { formatDate, formatMoney } from "@/lib/format";
+import { zonedParts } from "@/lib/timezone";
 import { fromPaise, toPaise, trimMoney } from "@/lib/money";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,7 +80,7 @@ export function SalaryPayments({
     { label: `Cut for ${absence.cutDays} day${absence.cutDays === 1 ? "" : "s"} off ${inMonth}`, value: `− ${formatMoney(absence.deduction, currencySymbol)}` },
     { label: `Advances ${inMonth}`, value: `− ${formatMoney(advances, currencySymbol)}` },
     { label: month === toMonthParam() ? "To pay this month" : `To pay for ${formatMonth(month)}`, value: formatMoney(toPay, currencySymbol) },
-    { label: `Paid in ${new Date().getFullYear()}`, value: formatMoney(paidThisYear, currencySymbol) },
+    { label: `Paid in ${zonedParts(new Date()).year}`, value: formatMoney(paidThisYear, currencySymbol) },
     { label: "Last paid", value: lastPaidOn ? formatDate(lastPaidOn) : "—" },
   ];
 
