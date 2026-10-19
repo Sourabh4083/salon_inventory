@@ -8,20 +8,6 @@
  */
 export const APP_TIMEZONE = "Asia/Kolkata";
 
-/**
- * The zone naive `timestamp` columns are written in. Prisma's pg adapter renders
- * a JS Date into `TIMESTAMP(3)` using the *running process's* zone and Postgres
- * then drops the offset, so the stored wall clock only means something alongside
- * that zone — and the same applies to the Date values Prisma compares against in
- * `where` clauses. Raw SQL that reinterprets the column has to use the same one.
- *
- * (Storing `timestamptz` instead would remove the guesswork; that is a schema
- * migration plus a backfill, tracked separately.)
- */
-export function runtimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-}
-
 export type ZonedParts = {
   year: number;
   /** 1-12, unlike Date#getMonth. */

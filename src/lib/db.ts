@@ -12,6 +12,10 @@ const POOL_MAX = Number(process.env.DB_POOL_MAX ?? (process.env.VERCEL ? 2 : 5))
 function createClient(connectionString: string) {
   const adapter = new PrismaPg({
     connectionString,
+    // The adapter sends Dates as UTC text with no offset, and timestamptz columns read
+    // that in the session's zone. The migrations also make UTC the database default,
+    // since poolers (Supabase's Supavisor) ignore this startup option.
+    options: "-c TimeZone=UTC",
     max: POOL_MAX,
     idleTimeoutMillis: 10_000,
     connectionTimeoutMillis: 10_000,

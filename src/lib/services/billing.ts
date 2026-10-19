@@ -7,7 +7,7 @@ import { recordAudit } from "@/lib/services/audit";
 import { applyChange, lockProduct } from "@/lib/services/inventory";
 import { closeEnquiryForBill } from "@/lib/services/enquiries";
 import { fromPaise, toPaise } from "@/lib/money";
-import { APP_TIMEZONE, runtimeZone } from "@/lib/timezone";
+import { APP_TIMEZONE } from "@/lib/timezone";
 import { endOfDay, startOfDay } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import type { BillCreateData, BillPaymentData, BillUpdateData } from "@/lib/validation/schemas";
@@ -755,10 +755,9 @@ export async function getSalesReport(range: { from: Date; to: Date }): Promise<S
     }),
     // Bucket by the salon's calendar day, not the host's: a bill rung up at 9 PM IST
     // is 3:30 PM UTC, and grouping on the raw column would file it under the wrong day.
-    // The column is naive, so it is first read back in the zone it was written in.
     prisma.$queryRaw<{ day: string; bills: bigint; amount: Prisma.Decimal | null }[]>`
       SELECT to_char(
-               date_trunc('day', "createdAt" AT TIME ZONE ${runtimeZone()}::text AT TIME ZONE ${APP_TIMEZONE}::text),
+               date_trunc('day', "createdAt" AT TIME ZONE ${APP_TIMEZONE}::text),
                'YYYY-MM-DD'
              ) AS day,
              COUNT(*) AS bills,

@@ -343,6 +343,11 @@ dashboard counts.
 All day boundaries, reports and bill dates use the salon's timezone, `Asia/Kolkata`
 (`src/lib/timezone.ts`), regardless of where the server runs.
 
+Every date column is `timestamptz`, so a stored time is an exact instant. Prisma's pg adapter
+sends times as UTC text without an offset, so database sessions must run in UTC: the migrations
+make UTC the database default and `src/lib/db.ts` asks for it on each connection. In raw SQL,
+read a column as the salon's wall clock with `"createdAt" AT TIME ZONE 'Asia/Kolkata'`.
+
 ## Testing
 
 ```bash
