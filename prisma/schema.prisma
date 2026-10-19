@@ -92,16 +92,16 @@ enum Unit {
 }
 
 model User {
-  id           String   @id @default(cuid())
-  name         String
-  email        String   @unique
-  passwordHash String
-  role         Role     @default(MANAGER)
-  isActive     Boolean  @default(true)
+  id             String   @id @default(cuid())
+  name           String
+  email          String   @unique
+  passwordHash   String
+  role           Role     @default(MANAGER)
+  isActive       Boolean  @default(true)
   /// Raised on password reset; login cookies carrying an older value stop working.
-  sessionVersion Int    @default(0)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  sessionVersion Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   movements         StockMovement[]
   auditLogs         AuditLog[]
@@ -214,27 +214,29 @@ model Service {
 
 /// A customer bill. Product lines reduce stock through SALE movements linked by billId.
 model Bill {
-  id            String         @id @default(cuid())
-  billNumber    String         @unique // BILL-000001
-  status        BillStatus     @default(COMPLETED)
-  customerName  String?
-  customerPhone String?
-  subtotal      Decimal        @db.Decimal(12, 2)
-  discount      Decimal        @default(0) @db.Decimal(12, 2)
-  total         Decimal        @db.Decimal(12, 2)
+  id               String         @id @default(cuid())
+  billNumber       String         @unique // BILL-000001
+  status           BillStatus     @default(COMPLETED)
+  customerName     String?
+  customerPhone    String?
+  /// Last 10 digits of customerPhone, so the same customer matches however the number was typed.
+  customerPhoneKey String?
+  subtotal         Decimal        @db.Decimal(12, 2)
+  discount         Decimal        @default(0) @db.Decimal(12, 2)
+  total            Decimal        @db.Decimal(12, 2)
   /// How the money taken at the counter was paid; null for a "pay later" bill with nothing paid then.
-  paymentMethod PaymentMethod? @default(CASH)
+  paymentMethod    PaymentMethod? @default(CASH)
   /// What the customer still owes (total minus payments). 0 once fully paid.
-  balanceDue    Decimal        @default(0) @db.Decimal(12, 2)
-  notes         String?
-  createdById   String
-  createdAt     DateTime       @default(now())
-  cancelledById String?
-  cancelledAt   DateTime?
-  cancelReason  String?
+  balanceDue       Decimal        @default(0) @db.Decimal(12, 2)
+  notes            String?
+  createdById      String
+  createdAt        DateTime       @default(now())
+  cancelledById    String?
+  cancelledAt      DateTime?
+  cancelReason     String?
   // Set when the owner changes a bill after it was made. Only the owner is shown this.
-  editedAt      DateTime?
-  editedById    String?
+  editedAt         DateTime?
+  editedById       String?
 
   items       BillItem[]
   movements   StockMovement[]
@@ -247,6 +249,7 @@ model Bill {
   @@index([createdAt])
   @@index([status, createdAt])
   @@index([customerPhone])
+  @@index([customerPhoneKey])
   @@index([status, balanceDue])
 }
 
@@ -321,19 +324,19 @@ model OpenBill {
 /// Money leaves cash/bank when the order is placed (paidAt); orders placed before that
 /// change have paidAt null and are paid on each delivery instead.
 model PurchaseOrder {
-  id          String      @id @default(cuid())
-  orderNumber String      @unique // ORD-000001
-  status      OrderStatus @default(ACTIVE)
-  notes       String?
-  createdById String
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  closedById  String?
-  closedAt    DateTime?
-  closeReason String?
+  id               String         @id @default(cuid())
+  orderNumber      String         @unique // ORD-000001
+  status           OrderStatus    @default(ACTIVE)
+  notes            String?
+  createdById      String
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  closedById       String?
+  closedAt         DateTime?
+  closeReason      String?
   /// When and how the order was paid for: the whole ordered amount, at the moment it was placed.
-  paidAt        DateTime?
-  paymentMethod PaymentMethod?
+  paidAt           DateTime?
+  paymentMethod    PaymentMethod?
   // GST from the supplier's bill, typed as amounts. Charged to cash/bank once: with the order
   // (prepaid orders) or on the first delivery (older orders).
   cgst             Decimal?       @db.Decimal(12, 2)

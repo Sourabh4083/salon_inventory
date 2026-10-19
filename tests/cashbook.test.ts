@@ -239,7 +239,8 @@ describe("running balances", () => {
 
     const m = await getMoneyMovement(today());
     expect([m.cash.moved, m.bank.moved, m.total.moved]).toEqual(["-5000.00", "5000.00", "0.00"]);
-    expect([m.cash.change, m.bank.change, m.total.change, m.total.out]).toEqual(["-5000.00", "5000.00", "0.00", "0.00"]);
+    // Moving cash is not money made or spent, so Change stays at zero.
+    expect([m.cash.change, m.bank.change, m.total.change, m.total.out]).toEqual(["0.00", "0.00", "0.00", "0.00"]);
 
     // Two passbook lines per move: out of the drawer, into the bank.
     const { items } = await listMoneyEntries(today());
@@ -257,6 +258,18 @@ describe("running balances", () => {
     await deleteCashDeposit(first.depositId!, owner);
     expect(await getBalances()).toMatchObject({ cash: "3000.00", bank: "22000.00", total: "25000.00" });
     expect(await prisma.auditLog.count({ where: { action: { in: ["CASH_TO_BANK", "CASH_TO_BANK_DELETED"] } } })).toBe(3);
+  });
+
+  it("Change counts only money made and spent, while the balances still follow the move", async () => {
+    await setBalances(balancesSchema.parse({ cash: "0", bank: "0" }), owner);
+    await tick();
+    await serviceBill("1000", { paymentMethod: "CASH" });
+    await moveCashToBank(cashDepositSchema.parse({ amount: "500" }), owner);
+
+    const m = await getMoneyMovement(today());
+    expect([m.cash.change, m.bank.change, m.total.change]).toEqual(["1000.00", "0.00", "1000.00"]);
+    expect([m.cash.moved, m.bank.moved]).toEqual(["-500.00", "500.00"]);
+    expect(await getBalances()).toMatchObject({ cash: "500.00", bank: "500.00", total: "1000.00" });
   });
 
   it("ignore an entry back-dated to before the count, and restart when corrected", async () => {
