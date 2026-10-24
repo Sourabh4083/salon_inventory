@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
-import { addNumbers, callsTabCounts, listEnquiries, logCall, markVisited, updateEnquiry } from "@/lib/services/enquiries";
+import { addNumbers, callsTabCounts, getCalledLead, listEnquiries, logCall, markVisited, updateEnquiry } from "@/lib/services/enquiries";
 import { createBill } from "@/lib/services/billing";
 import { addNumbersSchema, billCreateSchema, callLogSchema, enquiryEditSchema, splitPhoneNumbers } from "@/lib/validation/schemas";
 import { toDateParam } from "@/lib/dates";
@@ -178,5 +178,41 @@ describe("auto-close when the customer visits", () => {
     await bill("9123456789", owner);
     await bill(undefined, owner);
     expect((await prisma.enquiry.findFirstOrThrow()).status).toBe("NEW");
+  });
+
+  it("a customer who said not interested but comes anyway still counts as coming after our call", async () => {
+    await add("9876543210");
+    const id = await idOf("9876543210");
+    await logCall(callLogSchema.parse({ enquiryId: id, result: "NOT_INTERESTED" }), manager);
+
+    const b = await bill("98765-43210", manager);
+    const e = await prisma.enquiry.findUniqueOrThrow({ where: { id } });
+    expect(e).toMatchObject({ status: "VISITED", visitedBillId: b.id });
+  });
+});
+
+describe("called customer shown on the bill screen", () => {
+  it("finds the lead for the number in any format, with the last call and who made it", async () => {
+    await add("9876543210");
+    const id = await idOf("9876543210");
+    await logCall(callLogSchema.parse({ enquiryId: id, result: "NO_ANSWER" }), manager);
+    await logCall(callLogSchema.parse({ enquiryId: id, result: "COMING", date: day(1), name: "Priya", interest: "Hair patch", note: "After 5 pm" }), owner);
+
+    const lead = await getCalledLead(phoneKey("+91 98765 43210")!);
+    expect(lead).toMatchObject({ name: "Priya", interest: "Hair patch", callCount: 2 });
+    expect(lead!.lastCall).toMatchObject({ result: "COMING", calledByName: "Test Owner", note: "After 5 pm" });
+    expect(toDateParam(new Date(lead!.lastCall!.followUpOn!))).toBe(day(1));
+  });
+
+  it("shows numbers not called yet and not-interested ones; not visited ones or unknown numbers", async () => {
+    await add("9876543210, 9123456789, 9000000001");
+    expect(await getCalledLead("9876543210")).toMatchObject({ callCount: 0, lastCall: null });
+
+    await logCall(callLogSchema.parse({ enquiryId: await idOf("9123456789"), result: "NOT_INTERESTED" }), manager);
+    expect((await getCalledLead("9123456789"))!.lastCall!.result).toBe("NOT_INTERESTED");
+
+    await markVisited(await idOf("9000000001"), manager);
+    expect(await getCalledLead("9000000001")).toBeNull();
+    expect(await getCalledLead("9999999999")).toBeNull();
   });
 });

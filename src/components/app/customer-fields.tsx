@@ -2,18 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { History, LoaderCircle, UserRound } from "lucide-react";
+import { History, LoaderCircle, PhoneIncoming, UserRound } from "lucide-react";
 import { customerHistoryAction, searchCustomersAction } from "@/app/actions/billing";
 import type { CustomerHistoryDTO, CustomerSuggestionDTO } from "@/lib/services/customers";
+import type { CalledLeadDTO } from "@/lib/services/enquiries";
 import { formatDate, formatMoney } from "@/lib/format";
 import { phoneKey } from "@/lib/phone";
+import { RESULT_TEXT } from "@/lib/enquiry-labels";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
 
 /**
  * Customer name and phone on a bill. Typing either suggests past customers (name + number);
  * picking one fills both. Once the phone matches a past customer, their visits and recent
- * bills are shown underneath.
+ * bills are shown underneath; a number from the Calls list says the customer came after our call.
  */
 export function CustomerFields({
   name,
@@ -39,7 +41,7 @@ export function CustomerFields({
   const seq = useRef(0);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const [history, setHistory] = useState<CustomerHistoryDTO | null>(null);
+  const [history, setHistory] = useState<{ history: CustomerHistoryDTO; calledLead: CalledLeadDTO | null } | null>(null);
   const key = phoneKey(phone);
 
   useEffect(() => () => {
@@ -106,7 +108,9 @@ export function CustomerFields({
     }
   };
 
-  const shown = key && history?.phoneKey === key && history.visits > 0 ? history : null;
+  const current = key && history?.history.phoneKey === key ? history : null;
+  const shown = current && current.history.visits > 0 ? current.history : null;
+  const lead = current?.calledLead ?? null;
 
   return (
     <div className="space-y-3">
@@ -182,6 +186,8 @@ export function CustomerFields({
         ) : null}
       </div>
 
+      {lead ? <CalledLeadNote lead={lead} nameEmpty={!name.trim()} onUseName={onNameChange} /> : null}
+
       {shown ? (
         <div className="rounded-xl border bg-muted/40 px-3 py-2.5 text-sm">
           <p className="flex items-center gap-2 font-medium">
@@ -208,6 +214,35 @@ export function CustomerFields({
             </Link>
           ) : null}
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Came after our call": the lead on the Calls page this number belongs to, and what they said last. */
+function CalledLeadNote({ lead, nameEmpty, onUseName }: { lead: CalledLeadDTO; nameEmpty: boolean; onUseName: (v: string) => void }) {
+  const last = lead.lastCall;
+  const said = last ? `${RESULT_TEXT[last.result]}${last.followUpOn && (last.result === "COMING" || last.result === "CALL_BACK") ? ` on ${formatDate(last.followUpOn)}` : ""}` : null;
+  return (
+    <div role="status" className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-950 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-100">
+      <p className="flex items-center gap-2 font-semibold">
+        <PhoneIncoming className="size-4 shrink-0" />
+        {lead.callCount > 0 ? "Came after our call" : "From the Calls list (not called yet)"}
+      </p>
+      <p className="mt-1 text-xs">
+        Added {formatDate(lead.addedOn)}
+        {last ? (
+          <>
+            {" "}· called {lead.callCount} {lead.callCount === 1 ? "time" : "times"}, last {formatDate(last.calledAt)} by {last.calledByName}: <span className="font-semibold">{said}</span>
+          </>
+        ) : null}
+        {lead.interest ? <> · asked about: {lead.interest}</> : null}
+      </p>
+      {last?.note ? <p className="mt-1 text-xs italic">“{last.note}”</p> : null}
+      {lead.name && nameEmpty ? (
+        <button type="button" className="mt-1.5 text-xs font-semibold underline underline-offset-2" onClick={() => onUseName(lead.name!)}>
+          Use name: {lead.name}
+        </button>
       ) : null}
     </div>
   );

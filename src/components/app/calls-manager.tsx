@@ -10,6 +10,7 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { toDateParam } from "@/lib/dates";
 import { addDaysInZone, startOfDayInZone } from "@/lib/timezone";
 import { telLink, whatsappLink } from "@/lib/phone";
+import { RESULT_TEXT } from "@/lib/enquiry-labels";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,13 +37,6 @@ const STATUS_CHIP: Record<EnquiryStatus, { text: string; className: string }> = 
   COMING: { text: "Coming", className: "bg-emerald-100 text-emerald-800 dark:bg-emerald-500/10 dark:text-emerald-300" },
   VISITED: { text: "Visited", className: "bg-emerald-600 text-white dark:bg-emerald-500/30 dark:text-emerald-100" },
   NOT_INTERESTED: { text: "Not interested", className: "bg-muted text-muted-foreground" },
-};
-
-const RESULT_TEXT: Record<CallResult, string> = {
-  COMING: "Coming",
-  CALL_BACK: "Call back later",
-  NO_ANSWER: "No answer",
-  NOT_INTERESTED: "Not interested",
 };
 
 function StatusChip({ status }: { status: EnquiryStatus }) {

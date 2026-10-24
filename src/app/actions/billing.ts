@@ -19,6 +19,7 @@ import {
 } from "@/lib/validation/schemas";
 import { discardOpenBill, saveOpenBill, type OpenBillDTO } from "@/lib/services/open-bills";
 import { getCustomerHistory, searchCustomers, type CustomerHistoryDTO, type CustomerSuggestionDTO } from "@/lib/services/customers";
+import { getCalledLead, type CalledLeadDTO } from "@/lib/services/enquiries";
 import { phoneKey } from "@/lib/phone";
 import {
   addBillPayment,
@@ -157,11 +158,14 @@ export async function searchCustomersAction(query: string): Promise<ActionResult
   }
 }
 
-export async function customerHistoryAction(phone: string): Promise<ActionResult<CustomerHistoryDTO | null>> {
+/** Who the typed number belongs to: past visits, and the call lead they came from (if any). */
+export async function customerHistoryAction(phone: string): Promise<ActionResult<{ history: CustomerHistoryDTO; calledLead: CalledLeadDTO | null } | null>> {
   try {
     await requirePermission("bill.create");
     const key = phoneKey(String(phone ?? ""));
-    return { ok: true, data: key ? await getCustomerHistory(key) : null };
+    if (!key) return { ok: true, data: null };
+    const [history, calledLead] = await Promise.all([getCustomerHistory(key), getCalledLead(key)]);
+    return { ok: true, data: { history, calledLead } };
   } catch (err) {
     return toActionError(err);
   }

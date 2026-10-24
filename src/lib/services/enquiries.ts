@@ -19,6 +19,11 @@ import type { AddNumbersData, CallLogData, EnquiryEditData } from "@/lib/validat
 
 export const OPEN_STATUSES: EnquiryStatus[] = ["NEW", "NO_ANSWER", "CALL_BACK", "COMING"];
 const CLOSED_STATUSES: EnquiryStatus[] = ["VISITED", "NOT_INTERESTED"];
+/**
+ * Leads a bill for the same number is counted against: still open, or "not interested"
+ * people who came anyway (they still came because we called).
+ */
+export const LINKABLE_STATUSES: EnquiryStatus[] = [...OPEN_STATUSES, "NOT_INTERESTED"];
 
 export type CallsTab = "today" | "coming" | "later" | "closed";
 export const CALLS_TABS: CallsTab[] = ["today", "coming", "later", "closed"];
@@ -295,9 +300,41 @@ export async function markVisited(id: string, actor: SessionUser, now = new Date
   return toEnquiryDTO(updated);
 }
 
+export type CalledLeadDTO = {
+  name: string | null;
+  interest: string | null;
+  addedOn: string;
+  callCount: number;
+  lastCall: { calledAt: string; calledByName: string; result: CallResult; followUpOn: string | null; note: string | null } | null;
+};
+
 /**
- * Called inside the bill's transaction: the newest open enquiry for the bill's phone
- * number becomes VISITED and points at the bill.
+ * The lead this phone number came from, shown while the bill is being made so staff
+ * know the customer came after our call. Same rule as closeEnquiryForBill, so what is
+ * shown is what the bill will be counted against.
+ */
+export async function getCalledLead(key: string): Promise<CalledLeadDTO | null> {
+  const e = await prisma.enquiry.findFirst({
+    where: { phoneKey: key, status: { in: LINKABLE_STATUSES } },
+    orderBy: { createdAt: "desc" },
+    include: { calls: { orderBy: { calledAt: "desc" }, take: 1, include: { calledBy: { select: { name: true } } } }, _count: { select: { calls: true } } },
+  });
+  if (!e) return null;
+  const last = e.calls[0];
+  return {
+    name: e.name,
+    interest: e.interest,
+    addedOn: e.createdAt.toISOString(),
+    callCount: e._count.calls,
+    lastCall: last
+      ? { calledAt: last.calledAt.toISOString(), calledByName: last.calledBy.name, result: last.result, followUpOn: last.followUpOn?.toISOString() ?? null, note: last.note }
+      : null,
+  };
+}
+
+/**
+ * Called inside the bill's transaction: the newest open (or "not interested") enquiry
+ * for the bill's phone number becomes VISITED and points at the bill.
  */
 export async function closeEnquiryForBill(
   tx: Prisma.TransactionClient,
@@ -306,7 +343,7 @@ export async function closeEnquiryForBill(
 ): Promise<void> {
   const key = phoneKey(bill.customerPhone);
   if (!key) return;
-  const enquiry = await tx.enquiry.findFirst({ where: { phoneKey: key, status: { in: OPEN_STATUSES } }, orderBy: { createdAt: "desc" } });
+  const enquiry = await tx.enquiry.findFirst({ where: { phoneKey: key, status: { in: LINKABLE_STATUSES } }, orderBy: { createdAt: "desc" } });
   if (!enquiry) return;
   await tx.enquiry.update({
     where: { id: enquiry.id },
