@@ -2,6 +2,7 @@ import type { BillDTO } from "@/lib/services/billing";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { PAYMENT_LABEL, amountsByMethod, paymentMethodsLabel } from "@/components/app/bill-badges";
 import { cn } from "@/lib/utils";
+import { SHOP_ADDRESS_LINES, SHOP_PHONE } from "@/lib/constants";
 
 /**
  * Receipt layout used on screen and for printing. On print, everything else on the
@@ -15,7 +16,15 @@ export function BillReceipt({ bill, businessName, currencySymbol, className }: {
     <article className={cn("receipt mx-auto w-full max-w-sm rounded-2xl border bg-card p-5 text-sm shadow-xs print:max-w-none print:rounded-none print:border-0 print:p-0 print:shadow-none", className)} aria-label={`Receipt ${bill.billNumber}`}>
       <header className="receipt-rule border-b-2 pb-3 text-center">
         <h2 className="font-heading text-xl font-semibold">{businessName}</h2>
-        <p className="mt-1 text-[11px] font-medium tracking-[0.2em] text-muted-foreground uppercase">Bill / Receipt</p>
+        <address className="mt-1 text-xs leading-snug not-italic">
+          {SHOP_ADDRESS_LINES.map((line) => (
+            <span key={line} className="block">
+              {line}
+            </span>
+          ))}
+          <span className="block font-medium">Phone: {SHOP_PHONE}</span>
+        </address>
+        <p className="mt-2 text-[11px] font-medium tracking-[0.2em] text-muted-foreground uppercase">Bill / Receipt</p>
       </header>
 
       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">

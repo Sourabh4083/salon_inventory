@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
-import { billForViewer, getBill, getOriginalBillSummary, mayDeletePayment } from "@/lib/services/billing";
+import { billForViewer, getBill, getOriginalBillSummary, getShareLinkExpiry, mayDeletePayment } from "@/lib/services/billing";
 import { can } from "@/lib/permissions";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { PageHeader } from "@/components/app/page-header";
@@ -22,7 +22,10 @@ export default async function BillDetailPage({ params, searchParams }: { params:
   const [settings, found] = await Promise.all([getSettings(), getBill(id)]);
   if (!found) notFound();
   const bill = billForViewer(found, user.role);
-  const original = bill.editedAt ? await getOriginalBillSummary(bill.id) : null;
+  const [original, shareExpiresAt] = await Promise.all([
+    bill.editedAt ? getOriginalBillSummary(bill.id) : null,
+    user.role === "OWNER" ? getShareLinkExpiry(bill.id) : null,
+  ]);
   // A bill paid in full at the counter needs no payments section; the receipt says how it was paid.
   const paidAtCounter = bill.payments.length > 0 && bill.payments.every((p) => p.atBilling) && bill.amountPaid === bill.total;
   const showPayments = Number(bill.total) > 0 && !paidAtCounter;
@@ -44,7 +47,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
         />
         {isNew && bill.status === "COMPLETED" ? (
           <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-200">
-            <CheckCircle2 className="size-4.5 shrink-0" /> Bill saved and stock updated. Print the receipt or start the next bill.
+            <CheckCircle2 className="size-4.5 shrink-0" /> Bill saved and stock updated. {bill.customerPhone ? "Send it on WhatsApp, print the receipt" : "Print the receipt"} or start the next bill.
           </p>
         ) : null}
         {bill.editedAt ? (
@@ -58,7 +61,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
             Cancelled {bill.cancelledAt ? formatDateTime(bill.cancelledAt) : ""} by {bill.cancelledByName ?? "owner"}: {bill.cancelReason}. Product stock was restored.
           </p>
         ) : null}
-        <BillDetailActions bill={bill} role={user.role} currencySymbol={settings.currencySymbol} />
+        <BillDetailActions bill={bill} role={user.role} currencySymbol={settings.currencySymbol} businessName={settings.businessName} shareExpiresAt={shareExpiresAt} />
       </div>
 
       {showPayments ? (

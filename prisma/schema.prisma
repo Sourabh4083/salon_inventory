@@ -237,6 +237,10 @@ model Bill {
   // Set when the owner changes a bill after it was made. Only the owner is shown this.
   editedAt         DateTime?      @db.Timestamptz(3)
   editedById       String?
+  /// Secret code in the bill link sent to the customer on WhatsApp (/b/<code>); null until first sent
+  /// or after the owner turns the link off. The link stops working at shareExpiresAt.
+  shareToken       String?        @unique
+  shareExpiresAt   DateTime?      @db.Timestamptz(3)
 
   items       BillItem[]
   movements   StockMovement[]

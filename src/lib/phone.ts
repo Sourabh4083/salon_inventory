@@ -15,6 +15,13 @@ export function whatsappLink(raw: string): string {
   return `https://wa.me/${digits.length === 10 ? `91${digits}` : digits}`;
 }
 
+/** "98XXXXX210": enough for the customer to recognise their number on a public page. */
+export function maskPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "").slice(-10);
+  if (digits.length < 6) return "XXXXX";
+  return digits.slice(0, 2) + "X".repeat(digits.length - 5) + digits.slice(-3);
+}
+
 /** Link for dialing, keeping a leading + if there was one. */
 export function telLink(raw: string): string {
   return `tel:${raw.trim().startsWith("+") ? "+" : ""}${raw.replace(/\D/g, "")}`;

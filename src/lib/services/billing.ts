@@ -11,8 +11,9 @@ import { APP_TIMEZONE } from "@/lib/timezone";
 import { endOfDay, startOfDay } from "@/lib/dates";
 import { can } from "@/lib/permissions";
 import type { BillCreateData, BillPaymentData, BillUpdateData } from "@/lib/validation/schemas";
-import { PAGE_SIZE } from "@/lib/constants";
-import { phoneKey } from "@/lib/phone";
+import { randomBytes } from "node:crypto";
+import { PAGE_SIZE, SHARE_LINK_DAYS } from "@/lib/constants";
+import { maskPhone, phoneKey } from "@/lib/phone";
 
 /* ---------- DTOs ---------- */
 
@@ -305,6 +306,86 @@ export function billForViewer(bill: BillDTO, role: SessionUser["role"]): BillDTO
 export async function getBill(id: string): Promise<BillDTO | null> {
   const row = await prisma.bill.findUnique({ where: { id }, include: billInclude });
   return row ? toBillDTO(row) : null;
+}
+
+/* ---------- Bill link sent on WhatsApp ---------- */
+
+export type ShareLinkDTO = { token: string; expiresAt: string };
+
+/**
+ * The secret code for the customer's bill link. A link still in date is reused, so
+ * sending the bill twice sends the same link; an expired or turned-off one is replaced
+ * by a new code that works for SHARE_LINK_DAYS from now.
+ */
+export async function getOrCreateShareLink(billId: string, actor: SessionUser, now = new Date()): Promise<ShareLinkDTO> {
+  const bill = await prisma.bill.findUnique({
+    where: { id: billId },
+    select: { id: true, billNumber: true, status: true, customerPhone: true, shareToken: true, shareExpiresAt: true },
+  });
+  if (!bill) throw new AppError("Bill not found.", "NOT_FOUND");
+  if (bill.status !== "COMPLETED") throw new AppError("A cancelled bill can't be sent to the customer.");
+  if (!bill.customerPhone) throw new AppError("This bill has no customer phone number.");
+  if (bill.shareToken && bill.shareExpiresAt && bill.shareExpiresAt > now) {
+    return { token: bill.shareToken, expiresAt: bill.shareExpiresAt.toISOString() };
+  }
+  const token = randomBytes(16).toString("base64url");
+  const expiresAt = new Date(now.getTime() + SHARE_LINK_DAYS * 24 * 60 * 60 * 1000);
+  await prisma.$transaction(async (tx) => {
+    await tx.bill.update({ where: { id: bill.id }, data: { shareToken: token, shareExpiresAt: expiresAt } });
+    await recordAudit(tx, {
+      action: "BILL_SHARED",
+      entityType: "Bill",
+      entityId: bill.id,
+      summary: `Bill link for ${bill.billNumber} made to send on WhatsApp (works for ${SHARE_LINK_DAYS} days)`,
+      actorId: actor.id,
+    });
+  });
+  return { token, expiresAt: expiresAt.toISOString() };
+}
+
+/** Owner only: stops the customer's bill link working at once (e.g. sent to the wrong number). */
+export async function turnOffShareLink(billId: string, actor: SessionUser): Promise<void> {
+  if (actor.role !== "OWNER") throw new AppError("Only the owner can turn off a bill link.", "FORBIDDEN");
+  const bill = await prisma.bill.findUnique({ where: { id: billId }, select: { id: true, billNumber: true } });
+  if (!bill) throw new AppError("Bill not found.", "NOT_FOUND");
+  await prisma.$transaction(async (tx) => {
+    await tx.bill.update({ where: { id: bill.id }, data: { shareToken: null, shareExpiresAt: null } });
+    await recordAudit(tx, {
+      action: "BILL_SHARE_LINK_TURNED_OFF",
+      entityType: "Bill",
+      entityId: bill.id,
+      summary: `Bill link for ${bill.billNumber} turned off`,
+      actorId: actor.id,
+    });
+  });
+}
+
+/** When the bill's link stops working, for the owner's "Link active until" line; null when there is none. */
+export async function getShareLinkExpiry(billId: string, now = new Date()): Promise<string | null> {
+  const bill = await prisma.bill.findUnique({ where: { id: billId }, select: { shareToken: true, shareExpiresAt: true } });
+  return bill?.shareToken && bill.shareExpiresAt && bill.shareExpiresAt > now ? bill.shareExpiresAt.toISOString() : null;
+}
+
+/**
+ * The bill behind a customer's link, or null when the link is wrong, expired, turned
+ * off or the bill was cancelled. Anyone holding the link sees this, so only what is on
+ * the paper receipt goes out: the phone is masked, notes and staff-only details are dropped.
+ */
+export async function getSharedBill(token: string, now = new Date()): Promise<BillDTO | null> {
+  if (!token) return null;
+  const row = await prisma.bill.findUnique({ where: { shareToken: token }, include: billInclude });
+  if (!row || row.status !== "COMPLETED" || !row.shareExpiresAt || row.shareExpiresAt <= now) return null;
+  const bill = toBillDTO(row);
+  return {
+    ...bill,
+    id: "",
+    customerPhone: bill.customerPhone ? maskPhone(bill.customerPhone) : null,
+    notes: null,
+    payments: bill.payments.map((p) => ({ ...p, id: "", createdById: "", createdByName: "" })),
+    items: bill.items.map((i) => ({ ...i, productId: null, serviceId: null })),
+    editedAt: null,
+    editedByName: null,
+  };
 }
 
 export type ListBillsParams = {

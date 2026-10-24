@@ -3,12 +3,14 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Ban, LoaderCircle, Pencil, Plus, Printer } from "lucide-react";
-import { cancelBillAction } from "@/app/actions/billing";
+import { Ban, LoaderCircle, MessageCircle, Pencil, Plus, Printer } from "lucide-react";
+import { cancelBillAction, shareBillAction, turnOffShareLinkAction } from "@/app/actions/billing";
 import type { BillDTO } from "@/lib/services/billing";
 import type { Role } from "@/generated/prisma/enums";
 import { can } from "@/lib/permissions";
-import { formatMoney } from "@/lib/format";
+import { formatDate, formatMoney } from "@/lib/format";
+import { whatsappLink } from "@/lib/phone";
+import { buildBillWhatsappMessage } from "@/lib/bill-message";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
@@ -23,13 +25,55 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-export function BillDetailActions({ bill, role, currencySymbol }: { bill: BillDTO; role: Role; currencySymbol: string }) {
+export function BillDetailActions({
+  bill,
+  role,
+  currencySymbol,
+  businessName,
+  shareExpiresAt,
+}: {
+  bill: BillDTO;
+  role: Role;
+  currencySymbol: string;
+  businessName: string;
+  /** When the customer's bill link stops working; null when no link is active. */
+  shareExpiresAt: string | null;
+}) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  const [sharing, startShare] = useTransition();
   const canCancel = can(role, "bill.cancel") && bill.status === "COMPLETED";
   const canEdit = can(role, "bill.edit") && bill.status === "COMPLETED";
+  const canShare = bill.status === "COMPLETED" && Boolean(bill.customerPhone);
+
+  const sendOnWhatsapp = () => {
+    // Opened before the server call: a window opened after an await is blocked as a popup.
+    const win = window.open("", "_blank");
+    startShare(async () => {
+      const res = await shareBillAction(bill.id);
+      if (!res.ok) {
+        win?.close();
+        toast.error(res.error);
+        return;
+      }
+      const text = buildBillWhatsappMessage(bill, res.data.url, businessName, currencySymbol);
+      const url = `${whatsappLink(bill.customerPhone!)}?text=${encodeURIComponent(text)}`;
+      if (win) win.location.href = url;
+      // wa.me is outside the app (it opens WhatsApp), so the router can't take it.
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      else window.location.href = url;
+    });
+  };
+
+  const turnOffLink = () => {
+    startShare(async () => {
+      const res = await turnOffShareLinkAction(bill.id);
+      if (!res.ok) toast.error(res.error);
+      else toast.success("Bill link turned off", { description: "The link sent to the customer no longer opens the bill." });
+    });
+  };
 
   const cancel = () => {
     setError(null);
@@ -50,6 +94,11 @@ export function BillDetailActions({ bill, role, currencySymbol }: { bill: BillDT
         <Button size="lg" className="h-11" onClick={() => window.print()}>
           <Printer /> Print receipt
         </Button>
+        {canShare ? (
+          <Button size="lg" className="h-11 bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500" onClick={sendOnWhatsapp} disabled={sharing}>
+            {sharing ? <LoaderCircle className="animate-spin" /> : <MessageCircle />} Send on WhatsApp
+          </Button>
+        ) : null}
         <Button size="lg" variant="outline" className="h-11" render={<Link href="/billing/new" />}>
           <Plus /> New bill
         </Button>
@@ -64,6 +113,15 @@ export function BillDetailActions({ bill, role, currencySymbol }: { bill: BillDT
           </Button>
         ) : null}
       </div>
+
+      {canCancel && shareExpiresAt ? (
+        <p className="mt-2 text-xs text-muted-foreground print:hidden">
+          Bill link sent to the customer works until {formatDate(shareExpiresAt)} ·{" "}
+          <button type="button" className="font-medium text-destructive underline-offset-2 hover:underline disabled:opacity-50" onClick={turnOffLink} disabled={sharing}>
+            Turn off link
+          </button>
+        </p>
+      ) : null}
 
       {canCancel ? (
         <AlertDialog open={open} onOpenChange={setOpen}>

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { requirePermission } from "@/lib/auth/guards";
 import { toActionError, type ActionResult } from "@/lib/errors";
 import {
@@ -27,7 +28,9 @@ import {
   createBill,
   createService,
   deleteBillPayment,
+  getOrCreateShareLink,
   listServices,
+  turnOffShareLink,
   updateBill,
   updateService,
   type BillDTO,
@@ -135,6 +138,39 @@ export async function deleteBillPaymentAction(paymentId: string): Promise<Action
     const bill = await deleteBillPayment(paymentId, user);
     revalidateBilling(bill.id);
     return { ok: true, data: bill };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+/** Where the app is being used from, so the bill link opens the same site (e.g. https://salon-inventory-three.vercel.app). */
+async function siteOrigin(): Promise<string> {
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  if (!host) return (process.env.APP_URL ?? "").replace(/\/$/, "");
+  const proto = h.get("x-forwarded-proto") ?? (host.startsWith("localhost") || host.startsWith("127.") ? "http" : "https");
+  return `${proto}://${host}`;
+}
+
+export async function shareBillAction(billId: string): Promise<ActionResult<{ url: string; expiresAt: string }>> {
+  try {
+    const user = await requirePermission("bill.view");
+    const link = await getOrCreateShareLink(billId, user);
+    revalidatePath(`/billing/${billId}`);
+    revalidatePath("/activity");
+    return { ok: true, data: { url: `${await siteOrigin()}/b/${link.token}`, expiresAt: link.expiresAt } };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function turnOffShareLinkAction(billId: string): Promise<ActionResult<null>> {
+  try {
+    const user = await requirePermission("bill.cancel");
+    await turnOffShareLink(billId, user);
+    revalidatePath(`/billing/${billId}`);
+    revalidatePath("/activity");
+    return { ok: true, data: null };
   } catch (err) {
     return toActionError(err);
   }
