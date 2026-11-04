@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { cookies } from "next/headers";
 import { Manrope, Fraunces, Geist_Mono } from "next/font/google";
 import { Toaster } from "sonner";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const manrope = Manrope({ variable: "--font-sans", subsets: ["latin"], display: "swap" });
@@ -35,6 +36,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
       <body className="flex min-h-full flex-col">
         {children}
         <Toaster position="top-center" theme={night ? "dark" : "light"} richColors closeButton toastOptions={{ duration: 3500 }} />
+        <Analytics />
       </body>
     </html>
   );
