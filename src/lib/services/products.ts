@@ -5,6 +5,7 @@ import type { MovementType, ProductStatus, Role, Unit } from "@/generated/prisma
 import { AppError } from "@/lib/errors";
 import { getSettings } from "@/lib/services/settings";
 import { recordAudit } from "@/lib/services/audit";
+import { pruneReminders } from "@/lib/services/service-reminders";
 import { effectiveThreshold, getStockStatus, type StockStatus } from "@/lib/stock-status";
 import { MANAGER_EDITABLE_PRODUCT_FIELDS } from "@/lib/permissions";
 import { PAGE_SIZE } from "@/lib/constants";
@@ -23,6 +24,8 @@ export type ProductDTO = {
   barcode: string | null;
   categoryId: string;
   categoryName: string;
+  /** Its category needs servicing: selling it adds servicing calls for the customer. */
+  needsService: boolean;
   description: string | null;
   costPrice: string | null;
   sellingPrice: string | null;
@@ -63,7 +66,7 @@ export type MovementDTO = {
 };
 
 export const productInclude = {
-  category: { select: { name: true } },
+  category: { select: { name: true, needsService: true } },
   createdBy: { select: { name: true } },
   updatedBy: { select: { name: true } },
 } satisfies Prisma.ProductInclude;
@@ -80,6 +83,7 @@ export function toProductDTO(p: ProductRow, globalThreshold: number): ProductDTO
     barcode: p.barcode,
     categoryId: p.categoryId,
     categoryName: p.category.name,
+    needsService: p.category.needsService,
     description: p.description,
     costPrice: p.costPrice ? p.costPrice.toString() : null,
     sellingPrice: p.sellingPrice ? p.sellingPrice.toString() : null,
@@ -279,8 +283,15 @@ export async function findProductByCode(code: string): Promise<ProductDTO | null
   return row ? toProductDTO(row, settings.lowStockThreshold) : null;
 }
 
+/** Which of these products need servicing (for the bill screen's mobile-number hint). */
+export async function productIdsNeedingService(ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const rows = await prisma.product.findMany({ where: { id: { in: ids }, category: { needsService: true } }, select: { id: true } });
+  return rows.map((r) => r.id);
+}
+
 export async function listCategories() {
-  return prisma.category.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true } });
+  return prisma.category.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }], select: { id: true, name: true, needsService: true } });
 }
 
 /* ---------- Mutations ---------- */
@@ -528,6 +539,25 @@ export async function deleteProduct(id: string, actor: SessionUser) {
       },
     });
     return { productNumber: existing.productNumber, name: existing.name };
+  });
+}
+
+/** Turns servicing reminders on or off for products in this category (wigs, hair systems, ...). */
+export async function setCategoryNeedsService(id: string, needsService: boolean, actor: SessionUser) {
+  const existing = await prisma.category.findUnique({ where: { id } });
+  if (!existing) throw new AppError("Category not found.", "NOT_FOUND");
+  return prisma.$transaction(async (tx) => {
+    const category = await tx.category.update({ where: { id }, data: { needsService } });
+    // Turning it off also clears calls that came only from this category and nobody has made yet.
+    const pruned = needsService ? null : await pruneReminders(tx, actor.id);
+    await recordAudit(tx, {
+      action: "CATEGORY_UPDATED",
+      entityType: "Category",
+      entityId: id,
+      summary: `${needsService ? "Turned on" : "Turned off"} servicing reminders for "${category.name}"${pruned?.removed ? ` (${pruned.removed} calls removed)` : ""}`,
+      actorId: actor.id,
+    });
+    return { ...category, removedCalls: pruned?.removed ?? 0 };
   });
 }
 

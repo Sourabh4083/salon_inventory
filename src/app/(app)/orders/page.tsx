@@ -28,8 +28,8 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
     listOrders({
       statuses: history ? ["RECEIVED", "CLOSED"] : ["ACTIVE"],
       search: params.q,
-      ...parsePaging(params),
-      pageSize: history ? 20 : 50,
+      // 20 (History) or 50 (Waiting) unless another "Rows per page" is chosen.
+      ...parsePaging(params, history ? 20 : 50),
     }),
   ]);
 

@@ -2,10 +2,11 @@
 
 import { useId, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { CalendarCheck, CheckCheck, ChevronDown, ChevronUp, LoaderCircle, MessageCircle, Pencil, Phone, PhoneCall, PhoneMissed, PhoneOff, Plus, Store } from "lucide-react";
+import { BellRing, CalendarCheck, CheckCheck, Repeat, ChevronDown, ChevronUp, LoaderCircle, MessageCircle, Pencil, Phone, PhoneCall, PhoneMissed, PhoneOff, Plus, Store } from "lucide-react";
 import { addNumbersAction, logCallAction, markVisitedAction, updateEnquiryAction } from "@/app/actions/enquiries";
 import type { EnquiryDTO } from "@/lib/services/enquiries";
-import type { CallResult, EnquiryStatus } from "@/generated/prisma/enums";
+import type { CallResult, EnquiryKind, EnquiryStatus } from "@/generated/prisma/enums";
+import Link from "next/link";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { toDateParam } from "@/lib/dates";
 import { addDaysInZone, startOfDayInZone } from "@/lib/timezone";
@@ -44,6 +45,23 @@ function StatusChip({ status }: { status: EnquiryStatus }) {
   return <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wide uppercase", s.className)}>{s.text}</span>;
 }
 
+/** Servicing reminders added by the app when a product that needs servicing was sold. */
+const KIND_CHIP: Partial<Record<EnquiryKind, { text: string; due: string; icon: typeof BellRing }>> = {
+  SERVICE: { text: "Servicing", due: "Service due", icon: BellRing },
+  REPLACE: { text: "Replacement", due: "Replacement due", icon: Repeat },
+};
+
+function KindChip({ kind }: { kind: EnquiryKind }) {
+  const k = KIND_CHIP[kind];
+  if (!k) return null;
+  const Icon = k.icon;
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-primary uppercase">
+      <Icon className="size-3" /> {k.text}
+    </span>
+  );
+}
+
 /** "Today", "Tomorrow", "Yesterday" or "02 Oct 2026". */
 function dayLabel(iso: string, now = new Date()) {
   const day = startOfDayInZone(new Date(iso)).getTime();
@@ -52,6 +70,37 @@ function dayLabel(iso: string, now = new Date()) {
   if (day === addDaysInZone(today, 1).getTime()) return "Tomorrow";
   if (day === addDaysInZone(today, -1).getTime()) return "Yesterday";
   return formatDate(iso);
+}
+
+/**
+ * Servicing and replacement dates on one card; the one the card is for right now is highlighted.
+ * Once it is replacement time the card shows the last servicing visit instead of a servicing date.
+ */
+function ReminderDates({ enquiry: e }: { enquiry: EnquiryDTO }) {
+  const isService = e.kind === "SERVICE";
+  const pill = (active: boolean) =>
+    cn("inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs", active ? "bg-primary/10 font-semibold text-primary ring-1 ring-primary/30" : "text-muted-foreground");
+  return (
+    <p className="flex flex-wrap items-center gap-1.5 py-0.5">
+      {isService && e.serviceOn ? (
+        <span className={pill(true)}>
+          <BellRing className="size-3" /> Servicing: {formatDate(e.serviceOn)}
+        </span>
+      ) : null}
+      {!isService && e.lastServiceAt ? <span className={pill(false)}>Last servicing: {formatDate(e.lastServiceAt)}</span> : null}
+      {e.replaceOn ? (
+        <span className={pill(!isService)}>
+          <Repeat className="size-3" /> Replacement: {formatDate(e.replaceOn)}
+        </span>
+      ) : null}
+    </p>
+  );
+}
+
+/** dayLabel inside a sentence: "today", "tomorrow", but "02 Dec 2026" keeps its capital. */
+function dayInText(iso: string) {
+  const label = dayLabel(iso);
+  return /^\d/.test(label) ? label : label.toLowerCase();
 }
 
 function isPast(iso: string | null) {
@@ -63,13 +112,14 @@ function statusLine(e: EnquiryDTO): { text: string; late?: boolean } {
   const tries = e.calls.length;
   switch (e.status) {
     case "NEW":
-      return { text: `Added ${dayLabel(e.createdAt).toLowerCase() === "today" ? "today" : formatDate(e.createdAt)} by ${e.createdByName} · not called yet` };
+      return { text: `Added ${dayInText(e.createdAt) === "today" ? "today" : formatDate(e.createdAt)} by ${e.createdByName} · not called yet` };
     case "NO_ANSWER":
-      return { text: `No answer${tries > 1 ? ` (${tries} tries)` : ""} · try again ${dayLabel(e.nextCallOn!).toLowerCase()}`, late: isPast(e.nextCallOn) };
+      return { text: `No answer${tries > 1 ? ` (${tries} tries)` : ""} · try again ${dayInText(e.nextCallOn!)}`, late: isPast(e.nextCallOn) };
     case "CALL_BACK":
-      return { text: `Asked to call back ${dayLabel(e.nextCallOn!).toLowerCase()}`, late: isPast(e.nextCallOn) };
+      if (KIND_CHIP[e.kind] && !tries) return { text: `${KIND_CHIP[e.kind]!.due} ${dayInText(e.nextCallOn!)}`, late: isPast(e.nextCallOn) };
+      return { text: `Asked to call back ${dayInText(e.nextCallOn!)}`, late: isPast(e.nextCallOn) };
     case "COMING":
-      return isPast(e.comingOn) ? { text: `Said they would come ${dayLabel(e.comingOn!).toLowerCase()} but did not visit`, late: true } : { text: `Coming ${dayLabel(e.comingOn!).toLowerCase()}` };
+      return isPast(e.comingOn) ? { text: `Said they would come ${dayInText(e.comingOn!)} but did not visit`, late: true } : { text: `Coming ${dayInText(e.comingOn!)}` };
     case "VISITED":
       return { text: `Visited ${e.visitedAt ? formatDate(e.visitedAt) : ""} · ${e.visitedBillNumber ?? "marked by hand"}` };
     case "NOT_INTERESTED":
@@ -238,14 +288,32 @@ function EnquiryRow({ enquiry: e, onLog, onEdit, onVisited }: { enquiry: Enquiry
             <a href={telLink(e.phone)} className="text-base font-semibold hover:underline">
               {e.name ?? e.phone}
             </a>
-            <StatusChip status={e.status} />
+            <KindChip kind={e.kind} />
+            {/* A servicing entry nobody has called yet is just "due"; its kind chip says enough. */}
+            {e.kind !== "LEAD" && e.status === "CALL_BACK" && !e.calls.length ? null : <StatusChip status={e.status} />}
           </p>
           {e.name ? (
             <a href={telLink(e.phone)} className="block text-sm text-muted-foreground tabular-nums hover:underline">
               {e.phone}
             </a>
           ) : null}
-          {e.interest ? <p className="text-sm">Asked about: {e.interest}</p> : null}
+          {e.kind !== "LEAD" ? (
+            <p className="text-sm">
+              Bought {e.interest ?? "a product"}
+              {e.boughtAt ? <span className="text-muted-foreground"> · {formatDate(e.boughtAt)}</span> : null}
+              {e.sourceBillId && e.sourceBillNumber ? (
+                <>
+                  {" · "}
+                  <Link href={`/billing/${e.sourceBillId}`} className="text-primary hover:underline">
+                    {e.sourceBillNumber}
+                  </Link>
+                </>
+              ) : null}
+            </p>
+          ) : e.interest ? (
+            <p className="text-sm">Asked about: {e.interest}</p>
+          ) : null}
+          {e.kind !== "LEAD" ? <ReminderDates enquiry={e} /> : null}
           <p className={cn("text-xs", line.late ? "font-medium text-destructive" : "text-muted-foreground")}>{line.text}</p>
           {e.calls[0]?.note ? <p className="text-xs text-muted-foreground italic">“{e.calls[0].note}”</p> : null}
         </div>

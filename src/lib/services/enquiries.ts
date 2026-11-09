@@ -1,13 +1,13 @@
 import { prisma } from "@/lib/db";
 import type { Prisma } from "@/generated/prisma/client";
-import type { CallResult, EnquiryStatus } from "@/generated/prisma/enums";
+import type { CallResult, EnquiryKind, EnquiryStatus } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import { can } from "@/lib/permissions";
 import { recordAudit } from "@/lib/services/audit";
 import { endOfDay, startOfDay } from "@/lib/dates";
-import { addDaysInZone } from "@/lib/timezone";
+import { addDaysInZone, addMonthsInZone } from "@/lib/timezone";
 import { phoneKey } from "@/lib/phone";
-import { PAGE_SIZE } from "@/lib/constants";
+import { PAGE_SIZE, REPLACE_AFTER_MONTHS, SERVICE_EVERY_DAYS } from "@/lib/constants";
 import type { SessionUser } from "@/lib/auth/session";
 import type { AddNumbersData, CallLogData, EnquiryEditData } from "@/lib/validation/schemas";
 
@@ -39,6 +39,8 @@ export type EnquiryCallDTO = {
 
 export type EnquiryDTO = {
   id: string;
+  /** LEAD = new enquiry; SERVICE / REPLACE = customer due for servicing / replacement. */
+  kind: EnquiryKind;
   name: string | null;
   phone: string;
   interest: string | null;
@@ -50,12 +52,23 @@ export type EnquiryDTO = {
   visitedBillNumber: string | null;
   createdAt: string;
   createdByName: string;
+  /** SERVICE / REPLACE: the bill that sold the product, and when. */
+  sourceBillId: string | null;
+  sourceBillNumber: string | null;
+  boughtAt: string | null;
+  /** SERVICE: the planned servicing day (25 days after buying or the last servicing). */
+  serviceOn: string | null;
+  /** REPLACE: the last servicing visit, if there was one. */
+  lastServiceAt: string | null;
+  /** SERVICE / REPLACE: 7 months after buying. */
+  replaceOn: string | null;
   calls: EnquiryCallDTO[];
 };
 
 const enquiryInclude = {
   createdBy: { select: { name: true } },
   visitedBill: { select: { billNumber: true } },
+  sourceBill: { select: { billNumber: true, createdAt: true } },
   calls: { orderBy: { calledAt: "desc" }, include: { calledBy: { select: { name: true } } } },
 } satisfies Prisma.EnquiryInclude;
 type EnquiryRow = Prisma.EnquiryGetPayload<{ include: typeof enquiryInclude }>;
@@ -63,6 +76,7 @@ type EnquiryRow = Prisma.EnquiryGetPayload<{ include: typeof enquiryInclude }>;
 function toEnquiryDTO(e: EnquiryRow): EnquiryDTO {
   return {
     id: e.id,
+    kind: e.kind,
     name: e.name,
     phone: e.phone,
     interest: e.interest,
@@ -74,6 +88,12 @@ function toEnquiryDTO(e: EnquiryRow): EnquiryDTO {
     visitedBillNumber: e.visitedBill?.billNumber ?? null,
     createdAt: e.createdAt.toISOString(),
     createdByName: e.createdBy.name,
+    sourceBillId: e.sourceBillId,
+    sourceBillNumber: e.sourceBill?.billNumber ?? null,
+    boughtAt: e.sourceBill?.createdAt.toISOString() ?? null,
+    serviceOn: e.kind === "SERVICE" && e.cycleStart ? addDaysInZone(e.cycleStart, SERVICE_EVERY_DAYS).toISOString() : null,
+    lastServiceAt: e.kind === "REPLACE" && e.cycleStart && e.sourceBill && e.cycleStart.getTime() !== e.sourceBill.createdAt.getTime() ? e.cycleStart.toISOString() : null,
+    replaceOn: e.kind !== "LEAD" && e.sourceBill ? addMonthsInZone(e.sourceBill.createdAt, REPLACE_AFTER_MONTHS).toISOString() : null,
     calls: e.calls.map((c) => ({
       id: c.id,
       result: c.result,
@@ -143,6 +163,35 @@ function todayOrder(a: EnquiryRow, b: EnquiryRow) {
   return due(a) - due(b);
 }
 
+/**
+ * A servicing card whose replacement date (7 months after buying) has come turns into a
+ * replacement card. It is due on the replacement date, unless the staff already picked a later
+ * call-back day or the customer said they are coming. Run before showing the Calls page.
+ */
+export async function rollOverDueReplacements(now = new Date()): Promise<number> {
+  const cards = await prisma.enquiry.findMany({
+    where: { kind: "SERVICE", status: { in: OPEN_STATUSES }, sourceBill: { isNot: null } },
+    select: { id: true, name: true, phone: true, status: true, nextCallOn: true, sourceBill: { select: { createdAt: true } } },
+  });
+  const due = cards
+    .map((c) => ({ ...c, replaceOn: addMonthsInZone(c.sourceBill!.createdAt, REPLACE_AFTER_MONTHS) }))
+    .filter((c) => c.replaceOn <= now);
+  if (!due.length) return 0;
+  await prisma.$transaction(async (tx) => {
+    for (const c of due) {
+      const keepDate = c.status === "COMING" || (c.nextCallOn && c.nextCallOn > c.replaceOn);
+      await tx.enquiry.update({ where: { id: c.id }, data: { kind: "REPLACE", ...(keepDate ? {} : { nextCallOn: c.replaceOn }) } });
+    }
+    await recordAudit(tx, {
+      action: "SERVICE_REMINDERS_CHANGED",
+      entityType: "Enquiry",
+      summary: `Replacement time: ${due.map(label).join(", ")} moved from servicing to replacement`,
+      metadata: { ids: due.map((c) => c.id) },
+    });
+  });
+  return due.length;
+}
+
 export type EnquiryPage = { items: EnquiryDTO[]; total: number; page: number; pageSize: number; pageCount: number };
 
 export async function listEnquiries(params: { tab: CallsTab; search?: string; page?: number; pageSize?: number }, actor: SessionUser, now = new Date()): Promise<EnquiryPage> {
@@ -195,7 +244,7 @@ export async function addNumbers(input: AddNumbersData, actor: SessionUser): Pro
   }
 
   return prisma.$transaction(async (tx) => {
-    const open = await tx.enquiry.findMany({ where: { phoneKey: { in: [...byKey.keys()] }, status: { in: OPEN_STATUSES } }, select: { phoneKey: true } });
+    const open = await tx.enquiry.findMany({ where: { kind: "LEAD", phoneKey: { in: [...byKey.keys()] }, status: { in: OPEN_STATUSES } }, select: { phoneKey: true } });
     for (const { phoneKey: key } of open) {
       if (byKey.has(key)) {
         duplicates.push(byKey.get(key)!);
@@ -224,7 +273,7 @@ export async function updateEnquiry(id: string, input: EnquiryEditData, actor: S
     const existing = await tx.enquiry.findUnique({ where: { id } });
     if (!existing) throw new AppError("Enquiry not found.", "NOT_FOUND");
     if (key !== existing.phoneKey && OPEN_STATUSES.includes(existing.status)) {
-      const clash = await tx.enquiry.findFirst({ where: { phoneKey: key, status: { in: OPEN_STATUSES }, id: { not: id } } });
+      const clash = await tx.enquiry.findFirst({ where: { kind: existing.kind, phoneKey: key, status: { in: OPEN_STATUSES }, id: { not: id } } });
       if (clash) throw new AppError(`${input.phone} is already in the call list${clash.name ? ` as ${clash.name}` : ""}.`);
     }
     const enquiry = await tx.enquiry.update({ where: { id }, data: { name: input.name, phone: input.phone, phoneKey: key, interest: input.interest }, include: enquiryInclude });
@@ -315,7 +364,7 @@ export type CalledLeadDTO = {
  */
 export async function getCalledLead(key: string): Promise<CalledLeadDTO | null> {
   const e = await prisma.enquiry.findFirst({
-    where: { phoneKey: key, status: { in: LINKABLE_STATUSES } },
+    where: { kind: "LEAD", phoneKey: key, status: { in: LINKABLE_STATUSES } },
     orderBy: { createdAt: "desc" },
     include: { calls: { orderBy: { calledAt: "desc" }, take: 1, include: { calledBy: { select: { name: true } } } }, _count: { select: { calls: true } } },
   });
@@ -343,7 +392,7 @@ export async function closeEnquiryForBill(
 ): Promise<void> {
   const key = phoneKey(bill.customerPhone);
   if (!key) return;
-  const enquiry = await tx.enquiry.findFirst({ where: { phoneKey: key, status: { in: LINKABLE_STATUSES } }, orderBy: { createdAt: "desc" } });
+  const enquiry = await tx.enquiry.findFirst({ where: { kind: "LEAD", phoneKey: key, status: { in: LINKABLE_STATUSES } }, orderBy: { createdAt: "desc" } });
   if (!enquiry) return;
   await tx.enquiry.update({
     where: { id: enquiry.id },

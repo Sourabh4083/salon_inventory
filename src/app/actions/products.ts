@@ -15,6 +15,7 @@ import {
 } from "@/lib/validation/schemas";
 import {
   createCategory,
+  setCategoryNeedsService,
   createProduct,
   deleteProduct,
   findProductByCode,
@@ -128,6 +129,19 @@ export async function quickSearchProductsAction(query: string): Promise<ActionRe
     const user = await requirePermission("product.view");
     const result = await listProducts({ search: query, pageSize: 8 });
     return { ok: true, data: productsForViewer(result.items, user.role) };
+  } catch (err) {
+    return toActionError(err);
+  }
+}
+
+export async function setCategoryNeedsServiceAction(input: { id: string; needsService: boolean }): Promise<ActionResult<{ id: string; needsService: boolean; removedCalls: number }>> {
+  try {
+    const user = await requirePermission("category.manage");
+    if (typeof input?.id !== "string" || typeof input.needsService !== "boolean") return { ok: false, error: "Something went wrong. Please try again." };
+    const category = await setCategoryNeedsService(input.id, input.needsService, user);
+    revalidatePath("/settings");
+    revalidatePath("/calls");
+    return { ok: true, data: { id: category.id, needsService: category.needsService, removedCalls: category.removedCalls } };
   } catch (err) {
     return toActionError(err);
   }

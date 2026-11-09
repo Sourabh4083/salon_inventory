@@ -34,7 +34,7 @@ describe("remembering customers", () => {
 
     const byName = await searchCustomers("priy");
     expect(byName).toHaveLength(1);
-    expect(byName[0]).toMatchObject({ phoneKey: "9876543210", name: "Priya Sharma", phone: "+919876543210", visits: 2 });
+    expect(byName[0]).toMatchObject({ phoneKey: "9876543210", name: "Priya Sharma", phone: "9876543210", visits: 2 });
 
     expect((await searchCustomers("pri")).map((c) => c.phoneKey).sort()).toEqual(["9123456789", "9876543210"]);
     expect((await searchCustomers("91234")).map((c) => c.name)).toEqual(["Pritam"]);
