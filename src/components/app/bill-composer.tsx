@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Banknote, Clock, CreditCard, Hourglass, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Split, Trash2, X } from "lucide-react";
+import { Banknote, BellRing, Check, Clock, CreditCard, Hourglass, LoaderCircle, Minus, Plus, Receipt, Scissors, Search, Smartphone, Split, Trash2, X } from "lucide-react";
 import { lookupProductByCodeAction, quickSearchProductsAction } from "@/app/actions/products";
 import { createBillAction, discardOpenBillAction, saveOpenBillAction, updateBillAction } from "@/app/actions/billing";
 import type { ProductDTO } from "@/lib/services/products";
@@ -15,7 +15,6 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Field } from "@/components/app/field";
-import { NativeSelect } from "@/components/app/native-select";
 import { StockBadge } from "@/components/app/stock-badge";
 import { CustomerFields } from "@/components/app/customer-fields";
 import {
@@ -67,6 +66,8 @@ export type BillEditInit = {
   /** Set when money was collected after billing; payments are then managed on the bill page. */
   collectedLater: string | null;
   notes: string;
+  /** Employees who worked on the customer. */
+  employeeIds: string[];
   lines: Omit<Line, "key">[];
   /** Units of each product already on the bill; they count as available again while editing. */
   originalQty: Record<string, number>;
@@ -75,7 +76,7 @@ export type BillEditInit = {
 /** A bill kept open for a customer still in the shop, loaded to add more or to complete. */
 export type OpenBillInit = {
   id: string;
-  employeeId: string;
+  employeeIds: string[];
   customerName: string;
   customerPhone: string;
   discount: string;
@@ -89,18 +90,27 @@ export function BillComposer({
   edit,
   open,
   employees = [],
+  serviceProductIds = [],
 }: {
   services: ServiceDTO[];
   currencySymbol: string;
   edit?: BillEditInit;
   open?: OpenBillInit;
-  /** For "Handled by" on new and open bills. */
+  /** For "Handled by". */
   employees?: { id: string; name: string }[];
+  /** Products already on the bill whose category needs servicing (for the mobile-number hint). */
+  serviceProductIds?: string[];
 }) {
   const router = useRouter();
   const init = edit ?? open;
   const [lines, setLines] = useState<Line[]>(() => (init ? init.lines.map((l) => ({ ...l, key: nextKey() })) : []));
-  const [employeeId, setEmployeeId] = useState(open?.employeeId ?? "");
+  // Products that need servicing: known for loaded lines, learned from search for new ones.
+  const [serviceIds, setServiceIds] = useState(() => new Set(serviceProductIds));
+  const [employeeIds, setEmployeeIds] = useState<string[]>(init?.employeeIds ?? []);
+  const toggleEmployee = (id: string) => {
+    setEmployeeIds((prev) => (prev.includes(id) ? prev.filter((e) => e !== id) : [...prev, id]));
+    setErrors((prev) => ({ ...prev, employeeIds: "" }));
+  };
   const [discarding, setDiscarding] = useState(false);
   const [customerName, setCustomerName] = useState(init?.customerName ?? "");
   const [customerPhone, setCustomerPhone] = useState(init?.customerPhone ?? "");
@@ -144,6 +154,7 @@ export function BillComposer({
       toast.error(`${p.name} is out of stock.`);
       return;
     }
+    if (p.needsService && !serviceIds.has(p.id)) setServiceIds((prev) => new Set(prev).add(p.id));
     setLines((prev) => {
       const existing = prev.find((l) => l.kind === "PRODUCT" && l.productId === p.id);
       if (existing) {
@@ -217,6 +228,7 @@ export function BillComposer({
       paidNow: payLater && !split ? paidNow : "",
       split: split ? parts : null,
       notes,
+      employeeIds,
     };
     start(async () => {
       const res = edit ? await updateBillAction({ ...payload, billId: edit.billId, billedAt }) : await createBillAction({ ...payload, openBillId: open?.id });
@@ -246,15 +258,15 @@ export function BillComposer({
     setErrors({});
     setFormError(null);
     if (!lines.length) return setFormError("Add at least one product or service.");
-    if (!employeeId) {
+    if (!employeeIds.length) {
       const message = employees.length ? "Choose the employee handling this customer." : "No employees yet. The owner can add them under Employees.";
-      setErrors({ employeeId: message });
+      setErrors({ employeeIds: message });
       return setFormError(message);
     }
     start(async () => {
       const res = await saveOpenBillAction({
         id: open?.id,
-        employeeId,
+        employeeIds,
         customerName,
         customerPhone,
         discount,
@@ -271,7 +283,7 @@ export function BillComposer({
         toast.error(res.error);
         return;
       }
-      toast.success("Bill kept open", { description: `${res.data.employeeName} · ${formatMoney(res.data.total, currencySymbol)} so far.` });
+      toast.success("Bill kept open", { description: `${res.data.employeeNames.join(", ")} · ${formatMoney(res.data.total, currencySymbol)} so far.` });
       router.push("/billing");
     });
   };
@@ -440,18 +452,32 @@ export function BillComposer({
         )}
 
         <div className="space-y-4 border-t px-4 py-4 sm:px-5">
-          {edit ? null : (
-            <Field label="Handled by" htmlFor="bill-employee" error={errors.employeeId}>
-              <NativeSelect id="bill-employee" className="h-11" value={employeeId} onChange={(e) => setEmployeeId(e.target.value)} aria-invalid={Boolean(errors.employeeId)}>
-                <option value="">Choose employee</option>
-                {employees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {e.name}
-                  </option>
-                ))}
-              </NativeSelect>
-            </Field>
-          )}
+          <Field label="Handled by" htmlFor="bill-employees" error={errors.employeeIds}>
+            {employees.length ? (
+              <div id="bill-employees" role="group" aria-label="Handled by" className="flex flex-wrap gap-2">
+                {employees.map((e) => {
+                  const selected = employeeIds.includes(e.id);
+                  return (
+                    <button
+                      key={e.id}
+                      type="button"
+                      aria-pressed={selected}
+                      onClick={() => toggleEmployee(e.id)}
+                      className={cn(
+                        "flex h-10 items-center gap-1.5 rounded-xl border px-3 text-sm font-medium transition-colors",
+                        selected ? "border-primary bg-primary/10 text-primary" : "bg-background hover:bg-accent",
+                      )}
+                    >
+                      {selected ? <Check className="size-4" /> : null} {e.name}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No employees yet. The owner can add them under Employees.</p>
+            )}
+            <p className="mt-1.5 text-xs text-muted-foreground">Tap everyone who worked on this customer. Needed to keep the bill open.</p>
+          </Field>
 
           <CustomerFields
             name={customerName}
@@ -462,6 +488,11 @@ export function BillComposer({
             required={payLater}
             currencySymbol={currencySymbol}
           />
+          {!customerPhone.trim() && lines.some((l) => l.productId && serviceIds.has(l.productId)) ? (
+            <p className="-mt-2 flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+              <BellRing className="mt-0.5 size-4 shrink-0" /> Add the customer&apos;s mobile to get servicing reminders on the Calls page.
+            </p>
+          ) : null}
 
           {edit ? (
             <Field label="Bill date & time" htmlFor="bill-date" error={errors.billedAt}>

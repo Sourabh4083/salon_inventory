@@ -215,6 +215,22 @@ describe("reading", () => {
     const found = await listOrders({ search: "close me" });
     expect(found.items.map((o) => o.items[0].name)).toEqual(["Close Me"]);
   });
+
+  it("pages through every order once, and a page past the end shows the last page", async () => {
+    const all = await listOrders({ pageSize: 100 });
+    expect(all.total).toBeGreaterThan(2);
+    const seen: string[] = [];
+    for (let page = 1; page <= all.total; page++) {
+      const r = await listOrders({ page, pageSize: 1 });
+      expect(r.pageCount).toBe(all.total);
+      seen.push(...r.items.map((o) => o.id));
+    }
+    expect(new Set(seen).size).toBe(all.total);
+
+    const past = await listOrders({ page: all.total + 5, pageSize: 2 });
+    expect(past.page).toBe(past.pageCount);
+    expect(past.items.length).toBeGreaterThan(0);
+  });
 });
 
 describe("purchase report", () => {

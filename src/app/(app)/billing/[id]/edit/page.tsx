@@ -6,6 +6,8 @@ import { requirePermissionPage } from "@/lib/auth/guards";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/services/settings";
 import { getBill, listServices } from "@/lib/services/billing";
+import { listBillingEmployees } from "@/lib/services/open-bills";
+import { productIdsNeedingService } from "@/lib/services/products";
 import { zonedParts } from "@/lib/timezone";
 import { fromPaise, toPaise, trimMoney } from "@/lib/money";
 import { PageHeader } from "@/components/app/page-header";
@@ -27,6 +29,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
   const [settings, services, bill] = await Promise.all([getSettings(), listServices({ activeOnly: true }), getBill(id)]);
   if (!bill) notFound();
   if (bill.status === "CANCELLED") redirect(`/billing/${id}`);
+  const employees = await listBillingEmployees(bill.employeeIds);
 
   const originalQty: Record<string, number> = {};
   for (const i of bill.items) if (i.kind === "PRODUCT" && i.productId) originalQty[i.productId] = (originalQty[i.productId] ?? 0) + i.quantity;
@@ -54,6 +57,7 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
     split: counter.length > 1 ? { CASH: part("CASH"), UPI: part("UPI"), CARD: part("CARD") } : null,
     collectedLater: collectedLater > 0 ? fromPaise(collectedLater) : null,
     notes: bill.notes ?? "",
+    employeeIds: bill.employeeIds,
     originalQty,
     lines: bill.items.map((i) =>
       i.kind === "PRODUCT" && i.productId
@@ -73,7 +77,13 @@ export default async function EditBillPage({ params }: { params: Promise<{ id: s
           </Button>
         }
       />
-      <BillComposer services={services} currencySymbol={settings.currencySymbol} edit={edit} />
+      <BillComposer
+        services={services}
+        currencySymbol={settings.currencySymbol}
+        edit={edit}
+        employees={employees}
+        serviceProductIds={await productIdsNeedingService(Object.keys(originalQty))}
+      />
     </div>
   );
 }

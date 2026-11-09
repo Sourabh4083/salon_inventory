@@ -54,6 +54,15 @@ export const SHARE_LINK_DAYS = 10;
 /** The salon's online shop, mentioned in every bill message. */
 export const SHOP_ONLINE_URL = "https://blue-heaven-nine.vercel.app/";
 
+/* ---------- Servicing reminders (Calls page) ---------- */
+
+/** A product that needs servicing brings the customer back this many days after buying or the last servicing. */
+export const SERVICE_EVERY_DAYS = 25;
+/** ...and is due for replacement this many months after it was bought. */
+export const REPLACE_AFTER_MONTHS = 7;
+/** A visit sooner than this after the purchase or last servicing (e.g. buying glue) is not counted as servicing. */
+export const SERVICE_MIN_GAP_DAYS = 15;
+
 export const PAGE_SIZE = 25;
 /** Choices offered by the "Rows per page" picker under every paginated list. */
 export const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;

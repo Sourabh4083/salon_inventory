@@ -1,12 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, CheckCircle2 } from "lucide-react";
+import { ArrowLeft, BellRing, CheckCircle2 } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { getSettings } from "@/lib/services/settings";
 import { billForViewer, getBill, getOriginalBillSummary, getShareLinkExpiry, mayDeletePayment } from "@/lib/services/billing";
 import { can } from "@/lib/permissions";
-import { formatDateTime, formatMoney } from "@/lib/format";
+import { formatDate, formatDateTime, formatMoney } from "@/lib/format";
+import { getBillReminderNote } from "@/lib/services/service-reminders";
 import { PageHeader } from "@/components/app/page-header";
 import { BillReceipt } from "@/components/app/bill-receipt";
 import { BillDetailActions } from "@/components/app/bill-detail-actions";
@@ -22,9 +23,10 @@ export default async function BillDetailPage({ params, searchParams }: { params:
   const [settings, found] = await Promise.all([getSettings(), getBill(id)]);
   if (!found) notFound();
   const bill = billForViewer(found, user.role);
-  const [original, shareExpiresAt] = await Promise.all([
+  const [original, shareExpiresAt, reminder] = await Promise.all([
     bill.editedAt ? getOriginalBillSummary(bill.id) : null,
     user.role === "OWNER" ? getShareLinkExpiry(bill.id) : null,
+    isNew && bill.status === "COMPLETED" ? getBillReminderNote(bill.id) : null,
   ]);
   // A bill paid in full at the counter needs no payments section; the receipt says how it was paid.
   const paidAtCounter = bill.payments.length > 0 && bill.payments.every((p) => p.atBilling) && bill.amountPaid === bill.total;
@@ -41,6 +43,7 @@ export default async function BillDetailPage({ params, searchParams }: { params:
           description={
             <span className="flex flex-wrap items-center gap-2">
               {formatDateTime(bill.createdAt)} · billed by {bill.createdByName}
+              {bill.employeeNames.length ? ` · handled by ${bill.employeeNames.join(", ")}` : ""}
               <BillStatusBadge status={bill.status} />
             </span>
           }
@@ -48,6 +51,19 @@ export default async function BillDetailPage({ params, searchParams }: { params:
         {isNew && bill.status === "COMPLETED" ? (
           <p role="status" className="mb-4 flex items-center gap-2 rounded-xl border border-emerald-300 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-4 py-3 text-sm text-emerald-900 dark:text-emerald-200">
             <CheckCircle2 className="size-4.5 shrink-0" /> Bill saved and stock updated. {bill.customerPhone ? "Send it on WhatsApp, print the receipt" : "Print the receipt"} or start the next bill.
+          </p>
+        ) : null}
+        {reminder?.serviceOn || reminder?.replaceOn || reminder?.countedAsService ? (
+          <p role="status" className="mb-4 flex items-start gap-2 rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+            <BellRing className="mt-0.5 size-4.5 shrink-0 text-primary" />
+            <span>
+              {reminder.countedAsService
+                ? `Counted as a servicing visit. ${reminder.serviceOn ? `Next servicing call on ${formatDate(reminder.serviceOn)}` : `Next call is for the replacement${reminder.replaceOn ? ` on ${formatDate(reminder.replaceOn)}` : ""}`}.`
+                : `Added to Calls: servicing call on ${reminder.serviceOn ? formatDate(reminder.serviceOn) : "-"}${reminder.replaceOn ? `, replacement on ${formatDate(reminder.replaceOn)} (same card)` : ""}.`}{" "}
+              <Link href="/calls?tab=later" className="font-medium text-primary hover:underline">
+                See Calls › Call later
+              </Link>
+            </span>
           </p>
         ) : null}
         {bill.editedAt ? (

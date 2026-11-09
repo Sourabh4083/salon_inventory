@@ -117,6 +117,7 @@ async function billsSheets(p: Params): Promise<Sheet[]> {
         Payment: b.payments.length ? [...new Set(b.payments.map((p) => p.method))].join(" + ") : "Pay later",
         Paid: Number(b.amountPaid),
         "Balance due": b.status === "COMPLETED" ? Number(b.balanceDue) : 0,
+        "Handled by": b.employeeNames.join(", "),
         "Billed by": b.createdByName,
         Notes: b.notes,
         "Cancelled reason": b.cancelReason,

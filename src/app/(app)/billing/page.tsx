@@ -61,7 +61,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
               <li key={o.id}>
                 <Link href={`/billing/new?open=${o.id}`} className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-primary/5 p-4 shadow-xs transition-shadow hover:shadow-md">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{o.employeeName}</p>
+                    <p className="truncate font-medium">{o.employeeNames.join(", ")}</p>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
                       {o.customerName ? `${o.customerName} · ` : ""}
                       {o.itemCount} {o.itemCount === 1 ? "item" : "items"} · opened {formatRelative(o.createdAt)}
@@ -140,6 +140,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
                   <th className="px-4 py-3 font-medium">Customer</th>
                   <th className="px-4 py-3 font-medium">Items</th>
                   <th className="px-4 py-3 font-medium">Payment</th>
+                  <th className="px-4 py-3 font-medium">Handled by</th>
                   <th className="px-4 py-3 font-medium">Billed by</th>
                   <th className="px-4 py-3 font-medium">When</th>
                   <th className="px-4 py-3 text-right font-medium">Total</th>
@@ -163,6 +164,7 @@ export default async function BillsPage({ searchParams }: { searchParams: Promis
                     <td className="px-4 py-3">
                       <BillPaymentStatus bill={b} currencySymbol={sym} />
                     </td>
+                    <td className="px-4 py-3">{b.employeeNames.length ? b.employeeNames.join(", ") : <span className="text-muted-foreground">—</span>}</td>
                     <td className="px-4 py-3 text-muted-foreground">{b.createdByName}</td>
                     <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">{formatRelative(b.createdAt)}</td>
                     <td className="px-4 py-3 text-right font-semibold tabular-nums">{formatMoney(b.total, sym)}</td>

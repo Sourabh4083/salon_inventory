@@ -183,3 +183,28 @@ describe("sales report", () => {
     expect(report.topServices[0]).toMatchObject({ name: "Styling", quantity: 1, amount: "1000.00" });
   });
 });
+
+describe("customer mobile on a bill", () => {
+  const bill = (customerPhone?: string) => billCreateSchema.safeParse({ items: [{ kind: "SERVICE", name: "Haircut", quantity: 1, unitPrice: "300" }], customerPhone });
+
+  it("is optional", () => {
+    expect(bill().success).toBe(true);
+    expect(bill("").success).toBe(true);
+  });
+
+  it("is saved as 10 digits however it was typed", () => {
+    for (const typed of ["9876543210", "98765 43210", "98765-43210", "+91 98765 43210", "919876543210", "09876543210"]) {
+      const res = bill(typed);
+      expect(res.success, typed).toBe(true);
+      expect(res.data?.customerPhone).toBe("9876543210");
+    }
+  });
+
+  it("must have exactly 10 digits", () => {
+    for (const typed of ["98765", "987654321", "98765432101", "987654321012", "98765abcde"]) {
+      const res = bill(typed);
+      expect(res.success, typed).toBe(false);
+      expect(res.error!.issues[0]).toMatchObject({ path: ["customerPhone"], message: "Enter a 10-digit mobile number." });
+    }
+  });
+});

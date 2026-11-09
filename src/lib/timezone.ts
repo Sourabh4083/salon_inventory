@@ -76,6 +76,13 @@ export function addDaysInZone(date: Date, days: number): Date {
   return zonedDate(p.year, p.month, p.day + days);
 }
 
+/** Midnight that starts the same day `months` later (31 Jan + 1 month = 28/29 Feb). */
+export function addMonthsInZone(date: Date, months: number): Date {
+  const p = zonedParts(date);
+  const lastDay = new Date(Date.UTC(p.year, p.month - 1 + months + 1, 0)).getUTCDate();
+  return zonedDate(p.year, p.month + months, Math.min(p.day, lastDay));
+}
+
 /** "2026-09-08" for the instant's day in the salon's zone. */
 export function toDateParamInZone(date: Date): string {
   const p = zonedParts(date);

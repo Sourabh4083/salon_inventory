@@ -507,11 +507,12 @@ export async function listOrders(params: ListOrdersParams = {}) {
       { items: { some: { name: { contains: search, mode: "insensitive" } } } },
     ];
   }
-  const [rows, total] = await Promise.all([
-    prisma.purchaseOrder.findMany({ where, orderBy: { createdAt: "desc" }, include: orderInclude, skip: (page - 1) * pageSize, take: pageSize }),
-    prisma.purchaseOrder.count({ where }),
-  ]);
-  return { items: rows.map(toOrderDTO), total, page, pageSize, pageCount: Math.max(1, Math.ceil(total / pageSize)) };
+  const total = await prisma.purchaseOrder.count({ where });
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  // A page past the end (e.g. orders were closed meanwhile) shows the last page instead of an empty list.
+  const shown = Math.min(page, pageCount);
+  const rows = await prisma.purchaseOrder.findMany({ where, orderBy: { createdAt: "desc" }, include: orderInclude, skip: (shown - 1) * pageSize, take: pageSize });
+  return { items: rows.map(toOrderDTO), total, page: shown, pageSize, pageCount };
 }
 
 export async function countActiveOrders(): Promise<number> {

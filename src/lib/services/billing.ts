@@ -6,6 +6,8 @@ import type { SessionUser } from "@/lib/auth/session";
 import { recordAudit } from "@/lib/services/audit";
 import { applyChange, lockProduct } from "@/lib/services/inventory";
 import { closeEnquiryForBill } from "@/lib/services/enquiries";
+import { removeRemindersForBill, syncRemindersForEditedBill, updateServiceReminders } from "@/lib/services/service-reminders";
+import { assertBillingEmployees } from "@/lib/services/open-bills";
 import { fromPaise, toPaise } from "@/lib/money";
 import { APP_TIMEZONE } from "@/lib/timezone";
 import { endOfDay, startOfDay } from "@/lib/dates";
@@ -51,6 +53,9 @@ export type BillDTO = {
   cancelledAt: string | null;
   cancelledByName: string | null;
   cancelReason: string | null;
+  /** Who worked on the customer ("Handled by"); may be empty. */
+  employeeIds: string[];
+  employeeNames: string[];
   /** Owner only: pages must not show these to the manager. */
   editedAt: string | null;
   editedByName: string | null;
@@ -75,6 +80,7 @@ const billInclude = {
   createdBy: { select: { name: true } },
   cancelledBy: { select: { name: true } },
   editedBy: { select: { name: true } },
+  employees: { select: { id: true, name: true }, orderBy: { name: "asc" as const } },
 } satisfies Prisma.BillInclude;
 
 type BillRow = Prisma.BillGetPayload<{ include: typeof billInclude }>;
@@ -118,6 +124,8 @@ function toBillDTO(b: BillRow): BillDTO {
     cancelledAt: b.cancelledAt ? b.cancelledAt.toISOString() : null,
     cancelledByName: b.cancelledBy?.name ?? null,
     cancelReason: b.cancelReason,
+    employeeIds: b.employees.map((e) => e.id),
+    employeeNames: b.employees.map((e) => e.name),
     editedAt: b.editedAt ? b.editedAt.toISOString() : null,
     editedByName: b.editedBy?.name ?? null,
   };
@@ -178,10 +186,14 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
 
   const billId = await prisma.$transaction(async (tx) => {
     // Completing an open bill removes it in the same transaction, so it can't become two bills.
+    let openBillEmployeeIds: string[] = [];
     if (data.openBillId) {
+      const open = await tx.openBill.findUnique({ where: { id: data.openBillId }, select: { employees: { select: { id: true } } } });
       const { count } = await tx.openBill.deleteMany({ where: { id: data.openBillId } });
-      if (!count) throw new AppError("This open bill was already completed or discarded.", "CONFLICT");
+      if (!open || !count) throw new AppError("This open bill was already completed or discarded.", "CONFLICT");
+      openBillEmployeeIds = open.employees.map((e) => e.id);
     }
+    await assertBillingEmployees(tx, data.employeeIds, openBillEmployeeIds);
 
     const productIds = [...productQty.keys()].sort();
     const products = new Map<string, Awaited<ReturnType<typeof lockProduct>>>();
@@ -260,6 +272,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
         createdById: actor.id,
         createdAt: now,
         items: { createMany: { data: items } },
+        employees: { connect: data.employeeIds.map((id) => ({ id })) },
         payments: { create: parts.map((p) => ({ amount: fromPaise(p.paise), method: p.method, paidAt: now, atBilling: true, createdById: actor.id })) },
       },
     });
@@ -280,6 +293,7 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
     }
 
     await closeEnquiryForBill(tx, bill, actor.id);
+    await updateServiceReminders(tx, bill, items, actor.id);
 
     await recordAudit(tx, {
       action: "BILL_CREATED",
@@ -381,6 +395,8 @@ export async function getSharedBill(token: string, now = new Date()): Promise<Bi
     id: "",
     customerPhone: bill.customerPhone ? maskPhone(bill.customerPhone) : null,
     notes: null,
+    employeeIds: [],
+    employeeNames: [],
     payments: bill.payments.map((p) => ({ ...p, id: "", createdById: "", createdByName: "" })),
     items: bill.items.map((i) => ({ ...i, productId: null, serviceId: null })),
     editedAt: null,
@@ -536,6 +552,7 @@ export async function cancelBill(input: { billId: string; reason: string }, acto
       where: { id: bill.id },
       data: { status: "CANCELLED", cancelledById: actor.id, cancelledAt: new Date(), cancelReason: input.reason },
     });
+    await removeRemindersForBill(tx, bill, actor.id);
     await recordAudit(tx, {
       action: "BILL_CANCELLED",
       entityType: "Bill",
@@ -568,9 +585,13 @@ export async function updateBill(data: BillUpdateData, actor: SessionUser): Prom
 
   await prisma.$transaction(async (tx) => {
     await lockBill(tx, data.billId);
-    const bill = await tx.bill.findUnique({ where: { id: data.billId }, include: { items: { orderBy: { sortOrder: "asc" } }, payments: true } });
+    const bill = await tx.bill.findUnique({
+      where: { id: data.billId },
+      include: { items: { orderBy: { sortOrder: "asc" } }, payments: true, employees: { select: { id: true, name: true }, orderBy: { name: "asc" } } },
+    });
     if (!bill) throw new AppError("Bill not found.", "NOT_FOUND");
     if (bill.status === "CANCELLED") throw new AppError("A cancelled bill cannot be edited.");
+    await assertBillingEmployees(tx, data.employeeIds, bill.employees.map((e) => e.id));
 
     const oldQty = new Map<string, number>();
     const oldLine = new Map<string, { name: string; unitCost: Prisma.Decimal | null }>();
@@ -699,8 +720,17 @@ export async function updateBill(data: BillUpdateData, actor: SessionUser): Prom
         editedAt: new Date(),
         editedById: actor.id,
         items: { createMany: { data: items } },
+        employees: { set: data.employeeIds.map((id) => ({ id })) },
       },
     });
+
+    await syncRemindersForEditedBill(
+      tx,
+      { id: bill.id, billNumber: bill.billNumber, customerName: data.customerName, customerPhone: data.customerPhone, createdAt: data.billedAt },
+      bill.createdAt,
+      items,
+      actor.id,
+    );
 
     const dateMoved = bill.createdAt.getTime() !== data.billedAt.getTime();
     await recordAudit(tx, {
@@ -719,6 +749,7 @@ export async function updateBill(data: BillUpdateData, actor: SessionUser): Prom
           paymentMethod: bill.paymentMethod,
           balanceDue: bill.balanceDue.toFixed(2),
           notes: bill.notes,
+          employees: bill.employees.map((e) => e.name),
           items: bill.items.map((i) => ({ kind: i.kind, productId: i.productId, name: i.name, quantity: i.quantity, unitPrice: i.unitPrice.toFixed(2) })),
         },
         after: { createdAt: data.billedAt.toISOString(), total: fromPaise(total) },

@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { CalendarClock, CheckCheck, PhoneCall, Store } from "lucide-react";
 import { requirePermissionPage } from "@/lib/auth/guards";
 import { parsePaging } from "@/lib/paging";
-import { CALLS_TABS, callsTabCounts, listEnquiries, type CallsTab } from "@/lib/services/enquiries";
+import { CALLS_TABS, callsTabCounts, listEnquiries, rollOverDueReplacements, type CallsTab } from "@/lib/services/enquiries";
 import { PageHeader } from "@/components/app/page-header";
 import { AddNumbersBox, EnquiryList } from "@/components/app/calls-manager";
 import { OrderSearch } from "@/components/app/order-search";
@@ -24,6 +24,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
   const user = await requirePermissionPage("enquiry.manage");
   const params = await searchParams;
   const tab: CallsTab = CALLS_TABS.includes(params.tab as CallsTab) ? (params.tab as CallsTab) : "today";
+  await rollOverDueReplacements();
   const [counts, result] = await Promise.all([callsTabCounts(user), listEnquiries({ tab, search: params.q, ...parsePaging(params) }, user)]);
 
   const tabClass = (active: boolean) =>
@@ -34,7 +35,7 @@ export default async function CallsPage({ searchParams }: { searchParams: Promis
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Calls" description="New customer enquiries to phone. Add the number, tap it to call, then note what they said." />
+      <PageHeader title="Calls" description="New customer enquiries to phone, and customers due for servicing or a replacement of what they bought. Tap the number to call, then note what they said." />
 
       <AddNumbersBox />
 

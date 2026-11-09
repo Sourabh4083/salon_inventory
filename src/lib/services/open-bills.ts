@@ -23,8 +23,8 @@ export type OpenBillLine = {
 
 export type OpenBillDTO = {
   id: string;
-  employeeId: string;
-  employeeName: string;
+  employeeIds: string[];
+  employeeNames: string[];
   customerName: string | null;
   customerPhone: string | null;
   discount: string;
@@ -37,7 +37,7 @@ export type OpenBillDTO = {
   updatedAt: string;
 };
 
-const openBillInclude = { employee: { select: { name: true } } } satisfies Prisma.OpenBillInclude;
+const openBillInclude = { employees: { select: { id: true, name: true }, orderBy: { name: "asc" } } } satisfies Prisma.OpenBillInclude;
 
 type OpenBillRow = Prisma.OpenBillGetPayload<{ include: typeof openBillInclude }>;
 
@@ -45,8 +45,8 @@ function toOpenBillDTO(b: OpenBillRow, lines = b.lines as unknown as OpenBillLin
   const subtotal = lines.reduce((sum, l) => sum + toPaise(l.unitPrice) * l.quantity, 0);
   return {
     id: b.id,
-    employeeId: b.employeeId,
-    employeeName: b.employee.name,
+    employeeIds: b.employees.map((e) => e.id),
+    employeeNames: b.employees.map((e) => e.name),
     customerName: b.customerName,
     customerPhone: b.customerPhone,
     discount: b.discount ?? "",
@@ -90,10 +90,10 @@ export async function getOpenBill(id: string): Promise<OpenBillDTO | null> {
   return toOpenBillDTO(row, lines);
 }
 
-/** Names for the "Handled by" picker. `alsoId` keeps an open bill's employee listed after they are deactivated. */
-export async function listBillingEmployees(alsoId?: string): Promise<{ id: string; name: string }[]> {
+/** Names for the "Handled by" picker. `alsoIds` keeps a bill's employees listed after they are deactivated. */
+export async function listBillingEmployees(alsoIds: string[] = []): Promise<{ id: string; name: string }[]> {
   return prisma.employee.findMany({
-    where: alsoId ? { OR: [{ isActive: true }, { id: alsoId }] } : { isActive: true },
+    where: alsoIds.length ? { OR: [{ isActive: true }, { id: { in: alsoIds } }] } : { isActive: true },
     orderBy: { name: "asc" },
     select: { id: true, name: true },
   });
@@ -101,19 +101,26 @@ export async function listBillingEmployees(alsoId?: string): Promise<{ id: strin
 
 /* ---------- Mutations ---------- */
 
+/**
+ * "Handled by" may only name employees who are currently working. Those already on the
+ * bill (`keepIds`) stay allowed after they are deactivated, so the bill can still be saved.
+ */
+export async function assertBillingEmployees(db: Prisma.TransactionClient, ids: string[], keepIds: string[] = []) {
+  if (!ids.length) return;
+  const found = await db.employee.findMany({ where: { id: { in: ids } }, select: { id: true, isActive: true } });
+  const ok = new Set(found.filter((e) => e.isActive || keepIds.includes(e.id)).map((e) => e.id));
+  if (ids.some((id) => !ok.has(id))) throw new AppError("Choose employees who are currently working.");
+}
+
 /** Opens a bill for a customer in the shop, or saves what was added to one already open. Stock is not touched. */
 export async function saveOpenBill(data: OpenBillData, actor: SessionUser): Promise<OpenBillDTO> {
   assertCanBill(actor);
-  const existing = data.id ? await prisma.openBill.findUnique({ where: { id: data.id }, select: { employeeId: true } }) : null;
+  const existing = data.id ? await prisma.openBill.findUnique({ where: { id: data.id }, select: { employees: { select: { id: true } } } }) : null;
   if (data.id && !existing) throw new AppError(GONE, "CONFLICT");
+  await assertBillingEmployees(prisma, data.employeeIds, existing?.employees.map((e) => e.id));
 
-  const employee = await prisma.employee.findUnique({ where: { id: data.employeeId }, select: { isActive: true } });
-  if (!employee || (!employee.isActive && existing?.employeeId !== data.employeeId)) {
-    throw new AppError("Choose an employee who is currently working.");
-  }
-
+  const employees = data.employeeIds.map((id) => ({ id }));
   const fields = {
-    employeeId: data.employeeId,
     customerName: data.customerName,
     customerPhone: data.customerPhone,
     discount: data.discount,
@@ -121,8 +128,8 @@ export async function saveOpenBill(data: OpenBillData, actor: SessionUser): Prom
     lines: data.items as Prisma.InputJsonValue,
   };
   const row = data.id
-    ? await prisma.openBill.update({ where: { id: data.id }, data: fields, include: openBillInclude })
-    : await prisma.openBill.create({ data: { ...fields, createdById: actor.id }, include: openBillInclude });
+    ? await prisma.openBill.update({ where: { id: data.id }, data: { ...fields, employees: { set: employees } }, include: openBillInclude })
+    : await prisma.openBill.create({ data: { ...fields, employees: { connect: employees }, createdById: actor.id }, include: openBillInclude });
   return toOpenBillDTO(row);
 }
 
@@ -138,7 +145,7 @@ export async function discardOpenBill(id: string, actor: SessionUser): Promise<v
       action: "OPEN_BILL_DISCARDED",
       entityType: "OpenBill",
       entityId: id,
-      summary: `Discarded open bill handled by ${bill.employeeName}${bill.customerName ? ` for ${bill.customerName}` : ""} (${bill.total}: ${bill.lines
+      summary: `Discarded open bill handled by ${bill.employeeNames.join(", ")}${bill.customerName ? ` for ${bill.customerName}` : ""} (${bill.total}: ${bill.lines
         .map((l) => (l.quantity > 1 ? `${l.quantity}× ${l.name}` : l.name))
         .join(", ")})`,
       actorId: actor.id,

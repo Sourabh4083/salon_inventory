@@ -165,13 +165,27 @@ export const billItemSchema = z.discriminatedUnion("kind", [
   }),
 ]);
 
+/**
+ * A customer's mobile on a bill: optional, but when given it must be 10 digits.
+ * Spaces and dashes are ignored, and a leading +91 or 0 is dropped; saved as the 10 digits.
+ */
 const optionalPhone = optionalText(20).transform((v, ctx) => {
-  if (v && !/^[0-9+\-\s()]{6,20}$/.test(v)) {
-    ctx.addIssue({ code: "custom", message: "Enter a valid phone number." });
+  if (!v) return v;
+  let digits = v.replace(/\D/g, "");
+  if (digits.length === 12 && digits.startsWith("91")) digits = digits.slice(2);
+  else if (digits.length === 11 && digits.startsWith("0")) digits = digits.slice(1);
+  if (!/^[0-9+\-\s()]+$/.test(v) || digits.length !== 10) {
+    ctx.addIssue({ code: "custom", message: "Enter a 10-digit mobile number." });
     return z.NEVER;
   }
-  return v;
+  return digits;
 });
+
+/** Employees picked under "Handled by", each counted once. */
+const employeeIdsInput = z
+  .array(z.string().min(1))
+  .max(50)
+  .transform((ids) => [...new Set(ids)]);
 
 const billBase = z.object({
   items: z.array(billItemSchema).min(1, "Add at least one item to the bill."),
@@ -198,6 +212,8 @@ const billBase = z.object({
     .nullish()
     .transform((v) => v ?? null),
   notes: optionalText(500),
+  /** Employees who worked on the customer; optional. */
+  employeeIds: employeeIdsInput.default([]),
 });
 
 /** A pay-later bill must say who owes the money. */
@@ -239,7 +255,7 @@ const openBillItemSchema = z.discriminatedUnion("kind", [
 export const openBillSchema = z.object({
   /** Given when adding to a bill that is already open. */
   id: z.string().min(1).optional(),
-  employeeId: z.string().min(1, "Choose the employee handling this customer."),
+  employeeIds: employeeIdsInput.refine((ids) => ids.length > 0, "Choose the employee handling this customer."),
   customerName: optionalText(120),
   customerPhone: optionalPhone,
   discount: optionalText(20),
