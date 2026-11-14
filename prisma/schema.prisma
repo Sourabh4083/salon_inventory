@@ -241,6 +241,9 @@ model Bill {
   /// What the customer still owes (total minus payments). 0 once fully paid.
   balanceDue       Decimal        @default(0) @db.Decimal(12, 2)
   notes            String?
+  /// Made by the new-bill screen once per bill. Pressing Save again after a lost connection
+  /// sends the same key, so the bill is not made (and stock not taken) twice.
+  requestKey       String?        @unique
   createdById      String
   createdAt        DateTime       @default(now()) @db.Timestamptz(3)
   cancelledById    String?
@@ -363,6 +366,9 @@ model PurchaseOrder {
   sgst             Decimal?       @db.Decimal(12, 2)
   gstPaidAt        DateTime?      @db.Timestamptz(3)
   gstPaymentMethod PaymentMethod?
+  /// Made by the order screen once per new order. Pressing Place order again after a lost
+  /// connection sends the same key, so the order is not placed (and paid for) twice.
+  requestKey       String?        @unique
 
   items     PurchaseOrderItem[]
   movements StockMovement[]

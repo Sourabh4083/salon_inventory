@@ -45,6 +45,11 @@ export default async function OrderDetailPage({ params }: { params: Promise<{ id
           <p role="status" className="mb-4 rounded-xl border bg-muted/50 px-4 py-3 text-sm">
             Closed {order.closedAt ? formatDateTime(order.closedAt) : ""} by {order.closedByName ?? "owner"}: {order.closeReason}.
             {order.totalPending > 0 ? ` ${order.totalPending} ${order.totalPending === 1 ? "unit was" : "units were"} never received.` : ""}
+            {order.refund && order.paymentMethod ? (
+              <span className="mt-1 block font-medium text-emerald-700 dark:text-emerald-300">
+                {formatMoney(order.refund, sym)} came back to {order.paymentMethod === "CASH" ? "Cash" : "Bank"} for them.
+              </span>
+            ) : null}
           </p>
         ) : null}
         {order.status === "RECEIVED" ? (

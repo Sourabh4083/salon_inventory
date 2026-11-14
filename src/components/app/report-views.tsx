@@ -256,7 +256,7 @@ export function SpentView({ p, sym, expenses, purchases, expensesHref }: { p: Pr
         </Panel>
       </div>
 
-      <Panel title="Stock bought" icon={Truck} total={money(purchases.total)} note="Not counted in profit — this stock is on your shelf until it is sold. Counted on the day it was paid for (when ordered), at the order's cost price.">
+      <Panel title="Stock bought" icon={Truck} total={money(purchases.total)} note="Not counted in profit — this stock is on your shelf until it is sold. Counted on the day it was paid for (when ordered), at the order's cost price. Money back for products that never came is taken off on the day the order was closed.">
         {purchases.orders.length === 0 ? (
           <Empty>No order deliveries in this period.</Empty>
         ) : (

@@ -48,6 +48,56 @@ const PAYMENTS: { value: PaymentMethod; label: string; icon: React.ComponentType
 let keySeq = 0;
 const nextKey = () => `l${++keySeq}`;
 
+/** A new bill is kept in this browser while it is made, so a reload or a lost connection doesn't lose it. */
+const DRAFT_KEY = "new-bill-draft";
+const LOST_CONNECTION =
+  "Couldn't reach the server. The bill is still here: check the internet and press Complete bill again. If it keeps failing, reload the page; the bill comes back after a reload. It will not be saved twice.";
+const LOST_CONNECTION_OPEN = "Couldn't reach the server. The bill is still here: check the internet and press Keep open again.";
+
+type BillDraft = {
+  requestKey: string;
+  lines: Omit<Line, "key">[];
+  serviceIds: string[];
+  employeeIds: string[];
+  customerName: string;
+  customerPhone: string;
+  discount: string;
+  payment: PaymentMethod;
+  payLater: boolean;
+  paidNow: string;
+  split: boolean;
+  parts: Record<PaymentMethod, string>;
+  notes: string;
+};
+
+function newRequestKey() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    // randomUUID needs https; the shop may open the app over plain http on the local network.
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+function readDraft(): BillDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    const draft = raw ? (JSON.parse(raw) as BillDraft) : null;
+    return draft && Array.isArray(draft.lines) && typeof draft.requestKey === "string" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(draft: BillDraft | null) {
+  try {
+    if (draft) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Storage blocked or full: billing still works, the bill just isn't kept across a reload.
+  }
+}
+
 /** An existing bill loaded into the composer for the owner to change. */
 export type BillEditInit = {
   billId: string;
@@ -128,6 +178,79 @@ export function BillComposer({
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, start] = useTransition();
   const [customService, setCustomService] = useState<{ name: string; price: string } | null>(null);
+  // Only a brand-new bill is kept in the browser and sent with a key; edits and open bills are already saved.
+  const isNew = !edit && !open;
+  // Sent with a new bill; the same key on a retry returns the bill already made.
+  const [requestKey, setRequestKey] = useState(newRequestKey);
+  const draftLoaded = useRef(false);
+
+  const startOver = () => {
+    writeDraft(null);
+    setLines([]);
+    setServiceIds(new Set());
+    setEmployeeIds([]);
+    setCustomerName("");
+    setCustomerPhone("");
+    setDiscount("");
+    setPayment("CASH");
+    setPayLater(false);
+    setPaidNow("");
+    setSplit(false);
+    setParts({ CASH: "", UPI: "", CARD: "" });
+    setNotes("");
+    setRequestKey(newRequestKey());
+  };
+
+  // A new bill made earlier and not saved (page reloaded, tab closed, connection lost) comes back.
+  // Read after mount: browser storage doesn't exist while the page is rendered on the server.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!isNew || draftLoaded.current) return;
+    draftLoaded.current = true;
+    const draft = readDraft();
+    if (!draft || draft.lines.length === 0) return;
+    setLines(draft.lines.map((l) => ({ ...l, key: nextKey() })));
+    setServiceIds(new Set(draft.serviceIds ?? []));
+    // Someone who left the shop since can't be picked any more.
+    setEmployeeIds((draft.employeeIds ?? []).filter((id) => employees.some((e) => e.id === id)));
+    setCustomerName(draft.customerName ?? "");
+    setCustomerPhone(draft.customerPhone ?? "");
+    setDiscount(draft.discount ?? "");
+    if (draft.payment) setPayment(draft.payment);
+    setPayLater(Boolean(draft.payLater));
+    setPaidNow(draft.paidNow ?? "");
+    setSplit(Boolean(draft.split));
+    if (draft.parts) setParts(draft.parts);
+    setNotes(draft.notes ?? "");
+    setRequestKey(draft.requestKey);
+    const n = draft.lines.length;
+    toast.info(`Your unfinished bill is back (${n} ${n === 1 ? "item" : "items"})`, { action: { label: "Start over", onClick: startOver } });
+  }, [isNew, employees]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (!isNew || !draftLoaded.current) return;
+    const started = lines.length > 0 || customerName.trim() !== "" || customerPhone.trim() !== "" || notes.trim() !== "";
+    writeDraft(
+      started
+        ? {
+            requestKey,
+            lines: lines.map((l) => ({ kind: l.kind, productId: l.productId, serviceId: l.serviceId, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice, available: l.available })),
+            serviceIds: [...serviceIds],
+            employeeIds,
+            customerName,
+            customerPhone,
+            discount,
+            payment,
+            payLater,
+            paidNow,
+            split,
+            parts,
+            notes,
+          }
+        : null,
+    );
+  }, [isNew, requestKey, lines, serviceIds, employeeIds, customerName, customerPhone, discount, payment, payLater, paidNow, split, parts, notes]);
 
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, l) => sum + toPaise(l.unitPrice) * l.quantity, 0);
@@ -231,7 +354,18 @@ export function BillComposer({
       employeeIds,
     };
     start(async () => {
-      const res = edit ? await updateBillAction({ ...payload, billId: edit.billId, billedAt }) : await createBillAction({ ...payload, openBillId: open?.id });
+      let res: Awaited<ReturnType<typeof createBillAction>>;
+      try {
+        res = edit
+          ? await updateBillAction({ ...payload, billId: edit.billId, billedAt })
+          : await createBillAction({ ...payload, openBillId: open?.id, ...(isNew ? { requestKey } : {}) });
+      } catch {
+        // No answer from the server (internet dropped, app just updated): keep everything on screen.
+        const message = isNew ? LOST_CONNECTION : "Couldn't reach the server. Check the internet and try again.";
+        setFormError(message);
+        toast.error(message);
+        return;
+      }
       if (!res.ok) {
         setErrors(res.fieldErrors ?? {});
         setFormError(res.error);
@@ -243,6 +377,7 @@ export function BillComposer({
         router.push(`/billing/${res.data.id}`);
         return;
       }
+      if (isNew) writeDraft(null);
       toast.success(`${res.data.billNumber} saved`, {
         description:
           Number(res.data.balanceDue) > 0
@@ -264,25 +399,34 @@ export function BillComposer({
       return setFormError(message);
     }
     start(async () => {
-      const res = await saveOpenBillAction({
-        id: open?.id,
-        employeeIds,
-        customerName,
-        customerPhone,
-        discount,
-        notes,
-        items: lines.map((l) =>
-          l.kind === "PRODUCT"
-            ? { kind: "PRODUCT" as const, productId: l.productId!, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice }
-            : { kind: "SERVICE" as const, serviceId: l.serviceId ?? null, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice },
-        ),
-      });
+      let res: Awaited<ReturnType<typeof saveOpenBillAction>>;
+      try {
+        res = await saveOpenBillAction({
+          id: open?.id,
+          employeeIds,
+          customerName,
+          customerPhone,
+          discount,
+          notes,
+          items: lines.map((l) =>
+            l.kind === "PRODUCT"
+              ? { kind: "PRODUCT" as const, productId: l.productId!, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice }
+              : { kind: "SERVICE" as const, serviceId: l.serviceId ?? null, name: l.name, quantity: l.quantity, unitPrice: l.unitPrice },
+          ),
+        });
+      } catch {
+        setFormError(LOST_CONNECTION_OPEN);
+        toast.error(LOST_CONNECTION_OPEN);
+        return;
+      }
       if (!res.ok) {
         setErrors(res.fieldErrors ?? {});
         setFormError(res.error);
         toast.error(res.error);
         return;
       }
+      // Kept open on the server now, so the copy in this browser is no longer needed.
+      if (isNew) writeDraft(null);
       toast.success("Bill kept open", { description: `${res.data.employeeNames.join(", ")} · ${formatMoney(res.data.total, currencySymbol)} so far.` });
       router.push("/billing");
     });

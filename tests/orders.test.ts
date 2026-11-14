@@ -81,6 +81,27 @@ describe("placing an order", () => {
     await prisma.product.update({ where: { id: p.id }, data: { status: "ARCHIVED" } });
     await expect(createOrder(order([{ productId: p.id, quantity: 1 }]), owner)).rejects.toThrow(/archived/i);
   });
+
+  it("places it once when Place order is pressed again with the same key (lost connection)", async () => {
+    const p = await product("Retry Order", { costPrice: "50" });
+    const input = orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 3 }], requestKey: "retry-key-0001" });
+    const first = await createOrder(input, owner);
+    const again = await createOrder(input, owner);
+    expect(again.id).toBe(first.id);
+    expect(again.orderNumber).toBe(first.orderNumber);
+    expect(await prisma.purchaseOrder.count({ where: { items: { some: { productId: p.id } } } })).toBe(1);
+
+    // Both tries arriving at the same moment still make one order.
+    const raceInput = orderCreateSchema.parse({ items: [{ productId: p.id, quantity: 1 }], requestKey: "retry-key-0002" });
+    const [a, b] = await Promise.all([createOrder(raceInput, owner), createOrder(raceInput, owner)]);
+    expect(a.id).toBe(b.id);
+    expect(await prisma.purchaseOrder.count({ where: { requestKey: "retry-key-0002" } })).toBe(1);
+
+    // Without a key (older screens), every press is its own order.
+    const keyless = order([{ productId: p.id, quantity: 1 }]);
+    const [c, d] = [await createOrder(keyless, owner), await createOrder(keyless, owner)];
+    expect(c.id).not.toBe(d.id);
+  });
 });
 
 describe("receiving", () => {
@@ -251,14 +272,18 @@ describe("purchase report", () => {
     const placed = await getPurchaseReport({ from: start, to: new Date() });
     expect(placed.orders.find((x) => x.orderId === o.id)).toMatchObject({ units: 12, amount: "980.00" });
 
-    // Receiving, even short, and closing don't change what was paid.
+    // Receiving short doesn't change what was paid; closing gives back the 2 x 120 that never came.
     await receiveOrder(receive(o.id, [{ itemId: o.items[0].id, quantity: 5 }, { itemId: o.items[1].id, quantity: 2 }, { itemId: o.items[2].id, quantity: 3 }]), manager);
-    await closeOrder({ orderId: o.id, reason: "Rest not coming" }, owner);
+    expect((await getOrder(o.id))!.refund).toBe("240.00");
+    expect((await getPurchaseReport({ from: start, to: new Date() })).total).toBe("980.00");
+    const closed = await closeOrder({ orderId: o.id, reason: "Rest not coming" }, owner);
+    expect(closed.refund).toBe("240.00");
+    expect(orderForViewer(closed, "MANAGER").refund).toBeNull();
     const report = await getPurchaseReport({ from: start, to: new Date() });
-    expect(report.total).toBe("980.00");
-    expect(report.units).toBe(12);
+    expect(report.total).toBe("740.00");
+    expect(report.units).toBe(10);
     expect(report.uncostedUnits).toBe(3);
-    expect(report.orders).toEqual([expect.objectContaining({ orderId: o.id, units: 12, amount: "980.00" })]);
+    expect(report.orders).toEqual([expect.objectContaining({ orderId: o.id, units: 10, amount: "740.00" })]);
     const receipts = await prisma.stockMovement.findMany({ where: { purchaseOrderId: o.id } });
     expect(receipts.every((m) => m.paymentMethod === null)).toBe(true);
   });

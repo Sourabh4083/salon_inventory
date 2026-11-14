@@ -227,6 +227,8 @@ export const billCreateSchema = billBase
   .extend({
     /** Set when an open bill is being completed; it is removed together with making the bill. */
     openBillId: z.string().min(1).optional(),
+    /** New bills only: one key per bill screen, so a retry after a lost connection doesn't make it twice. */
+    requestKey: z.string().trim().min(8).max(64).optional(),
   })
   .superRefine(requireCustomerForPayLater);
 export type BillCreateInput = z.input<typeof billCreateSchema>;
@@ -292,6 +294,8 @@ export const orderCreateSchema = z.object({
   sgst: moneyInput,
   /** How the order was paid for; the money leaves cash/bank when it is placed. */
   paymentMethod: z.enum(PAYMENT_METHODS).default("CASH"),
+  /** New orders only: one key per order screen, so a retry after a lost connection doesn't place it twice. */
+  requestKey: z.string().trim().min(8).max(64).optional(),
 });
 export type OrderCreateInput = z.input<typeof orderCreateSchema>;
 export type OrderCreateData = z.output<typeof orderCreateSchema>;
