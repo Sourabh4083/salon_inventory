@@ -208,3 +208,28 @@ describe("customer mobile on a bill", () => {
     }
   });
 });
+
+describe("pressing Complete bill again after a lost connection", () => {
+  it("makes the bill once for the same key, and takes the stock once", async () => {
+    const spray = await createProduct(productInput({ name: "Retry Spray", sellingPrice: "200", startingQuantity: 10 }), owner);
+    const input = billCreateSchema.parse({ items: [{ kind: "PRODUCT", productId: spray.id, quantity: 2, unitPrice: "200" }], paymentMethod: "CASH", requestKey: "bill-retry-0001" });
+    const first = await createBill(input, manager);
+    const again = await createBill(input, manager);
+    expect([again.id, again.billNumber]).toEqual([first.id, first.billNumber]);
+    expect((await getProduct(spray.id))?.quantity).toBe(8);
+    expect(await prisma.billPayment.count({ where: { billId: first.id } })).toBe(1);
+
+    // Both tries arriving at the same moment still make one bill.
+    const race = billCreateSchema.parse({ items: [{ kind: "PRODUCT", productId: spray.id, quantity: 1, unitPrice: "200" }], paymentMethod: "UPI", requestKey: "bill-retry-0002" });
+    const [a, b] = await Promise.all([createBill(race, manager), createBill(race, manager)]);
+    expect(a.id).toBe(b.id);
+    expect(await prisma.bill.count({ where: { requestKey: "bill-retry-0002" } })).toBe(1);
+    expect((await getProduct(spray.id))?.quantity).toBe(7);
+
+    // Without a key, every press is its own bill.
+    const keyless = billCreateSchema.parse({ items: [{ kind: "PRODUCT", productId: spray.id, quantity: 1, unitPrice: "200" }], paymentMethod: "CASH" });
+    const [c, d] = [await createBill(keyless, manager), await createBill(keyless, manager)];
+    expect(c.id).not.toBe(d.id);
+    expect((await getProduct(spray.id))?.quantity).toBe(5);
+  });
+});

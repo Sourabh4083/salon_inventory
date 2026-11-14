@@ -90,7 +90,7 @@ export function OrderActions({ order, role, currencySymbol, className }: { order
 
       {canReceive ? <ReceiveAllDialog order={order} gst={gst} open={dialog === "all"} onOpenChange={(o) => setDialog(o ? "all" : null)} /> : null}
       {canReceive ? <ReceivePartialDialog order={order} gst={gst} open={dialog === "partial"} onOpenChange={(o) => setDialog(o ? "partial" : null)} /> : null}
-      {canManage ? <CloseOrderDialog order={order} open={dialog === "close"} onOpenChange={(o) => setDialog(o ? "close" : null)} /> : null}
+      {canManage ? <CloseOrderDialog order={order} currencySymbol={currencySymbol} open={dialog === "close"} onOpenChange={(o) => setDialog(o ? "close" : null)} /> : null}
     </div>
   );
 }
@@ -272,7 +272,8 @@ function PartialForm({ order, gst, close }: { order: OrderDTO; gst: GstProp; clo
   );
 }
 
-function CloseOrderDialog({ order, open, onOpenChange }: { order: OrderDTO; open: boolean; onOpenChange: (open: boolean) => void }) {
+function CloseOrderDialog({ order, currencySymbol, open, onOpenChange }: { order: OrderDTO; currencySymbol: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const refund = order.refund && order.paymentMethod ? `${formatMoney(order.refund, currencySymbol)} back to ${order.paymentMethod === "CASH" ? "Cash" : "Bank"}` : null;
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
@@ -285,7 +286,7 @@ function CloseOrderDialog({ order, open, onOpenChange }: { order: OrderDTO; open
         setError(res.fieldErrors?.reason ?? res.error);
         return;
       }
-      toast.success(`${order.orderNumber} closed`, { description: "Stock was not changed." });
+      toast.success(`${order.orderNumber} closed`, { description: refund ? `${refund}. Stock was not changed.` : "Stock was not changed." });
       onOpenChange(false);
     });
   };
@@ -300,6 +301,11 @@ function CloseOrderDialog({ order, open, onOpenChange }: { order: OrderDTO; open
               ? "Nothing has arrived on this order. Closing it stops waiting for it. Stock does not change."
               : `${plural(order.totalPending, "unit")} still pending will be marked as not received. Products already received stay in stock.`}
           </AlertDialogDescription>
+          {refund ? (
+            <p className="rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+              Money for what didn&apos;t come: <span className="font-semibold">{refund}</span>.
+            </p>
+          ) : null}
         </AlertDialogHeader>
         <Field label="Reason" htmlFor={`close-${order.id}`} required error={error ?? undefined}>
           <Input

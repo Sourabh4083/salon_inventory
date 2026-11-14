@@ -5,7 +5,7 @@ import { addBillPayment, cancelBill, createBill } from "@/lib/services/billing";
 import { addSalaryPayment, createEmployee } from "@/lib/services/employees";
 import { recordAdvance } from "@/lib/services/advances";
 import { createExpense } from "@/lib/services/expenses";
-import { createOrder, receiveOrder } from "@/lib/services/orders";
+import { closeOrder, createOrder, receiveOrder } from "@/lib/services/orders";
 import { recordStockIn } from "@/lib/services/inventory";
 import {
   addOwnerWithdrawal,
@@ -220,6 +220,27 @@ describe("running balances", () => {
     const e = await employee();
     await addSalaryPayment(salaryPaymentSchema.parse({ employeeId: e.id, amount: "15000", paidOn: toDateParam(new Date()), paymentMethod: "CARD" }), owner);
     expect(await getBalances()).toMatchObject({ cash: "5300.00", bank: "4880.00", total: "10180.00" });
+  });
+
+  it("closing a paid order puts the money for what never came back in the account it was paid from", async () => {
+    const glue = await product("Refund Glue");
+    const tape = await product("Refund Tape");
+    await setBalances(balancesSchema.parse({ cash: "0", bank: "10000" }), owner);
+    await tick();
+    // 4 x 100 + 2 x 50 = 500, GST 50 + 50: 600 paid by UPI.
+    const o = await createOrder(
+      orderCreateSchema.parse({ items: [{ productId: glue.id, quantity: 4, unitCost: "100" }, { productId: tape.id, quantity: 2, unitCost: "50" }], cgst: "50", sgst: "50", paymentMethod: "UPI" }),
+      owner,
+    );
+    expect((await getBalances())!.bank).toBe("9400.00");
+    // Only 1 glue came: 3 x 100 + 2 x 50 = 400 never came, plus its 400/500 share of the 100 GST.
+    await receiveOrder(orderReceiveSchema.parse({ orderId: o.id, lines: [{ itemId: o.items[0].id, quantity: 1 }] }), manager);
+    await closeOrder({ orderId: o.id, reason: "Shop ran out" }, owner);
+    expect(await getBalances()).toMatchObject({ cash: "0.00", bank: "9880.00" });
+    expect((await getMoneyMovement(today())).bank.stock).toBe("120.00");
+
+    const { items } = await listMoneyEntries(today());
+    expect(items.find((i) => i.key === `refund-${o.id}`)).toMatchObject({ account: "bank", method: "UPI", amount: "480.00", href: `/orders/${o.id}` });
   });
 
   it("cash moved to the bank leaves the drawer, lands in the bank and keeps the total", async () => {

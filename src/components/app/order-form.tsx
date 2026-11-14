@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { LoaderCircle, Minus, Plus, Trash2, Truck } from "lucide-react";
@@ -18,6 +18,41 @@ import { Field } from "@/components/app/field";
 import { ProductPickerDialog } from "@/components/app/product-picker-dialog";
 import { ProductForm } from "@/components/app/product-form";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+
+/** A new order is kept in this browser while it is typed, so a reload or a lost connection doesn't lose it. */
+const DRAFT_KEY = "new-order-draft";
+const LOST_CONNECTION =
+  "Couldn't reach the server. Your products are still here: check the internet and press the button again. If it keeps failing, reload the page; the products come back after a reload. The order will not be placed twice.";
+
+type OrderDraft = { requestKey: string; lines: OrderFormLine[]; notes: string; cgst: string; sgst: string; method: PaymentMethod };
+
+function newRequestKey() {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    // randomUUID needs https; the shop may open the app over plain http on the local network.
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+  }
+}
+
+function readDraft(): OrderDraft | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    const draft = raw ? (JSON.parse(raw) as OrderDraft) : null;
+    return draft && Array.isArray(draft.lines) && typeof draft.requestKey === "string" ? draft : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(draft: OrderDraft | null) {
+  try {
+    if (draft) localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    // Storage blocked or full: the order still works, it just isn't kept across a reload.
+  }
+}
 
 export type OrderFormLine = {
   itemId?: string;
@@ -62,6 +97,45 @@ export function OrderForm({
   const [newProductName, setNewProductName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+  // Sent with a new order; the same key on a retry returns the order already placed.
+  const [requestKey, setRequestKey] = useState(newRequestKey);
+  const draftLoaded = useRef(false);
+
+  // A new order typed earlier and not placed (page reloaded, tab closed, connection lost) comes back.
+  // Read after mount: browser storage doesn't exist while the page is rendered on the server.
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (initial || draftLoaded.current) return;
+    draftLoaded.current = true;
+    const draft = readDraft();
+    if (!draft || draft.lines.length === 0) return;
+    setLines(draft.lines);
+    setNotes(draft.notes ?? "");
+    setCgst(draft.cgst ?? "");
+    setSgst(draft.sgst ?? "");
+    if (draft.method) setMethod(draft.method);
+    setRequestKey(draft.requestKey);
+    toast.info(`Your unfinished order is back (${draft.lines.length} ${draft.lines.length === 1 ? "product" : "products"})`, {
+      action: {
+        label: "Start over",
+        onClick: () => {
+          writeDraft(null);
+          setLines([]);
+          setNotes("");
+          setCgst("");
+          setSgst("");
+          setMethod("CASH");
+          setRequestKey(newRequestKey());
+        },
+      },
+    });
+  }, [initial]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  useEffect(() => {
+    if (initial || !draftLoaded.current) return;
+    writeDraft(lines.length || notes.trim() ? { requestKey, lines, notes, cgst, sgst, method } : null);
+  }, [initial, requestKey, lines, notes, cgst, sgst, method]);
 
   const totals = useMemo(
     () => ({
@@ -85,34 +159,46 @@ export function OrderForm({
     setError(null);
     if (!lines.length) return setError("Add at least one product.");
     start(async () => {
-      if (costsOnly && initial) {
-        const res = await updateOrderCostsAction(initial.orderId, { items: lines.map((l) => ({ itemId: l.itemId!, unitCost: l.unitCost })), notes, cgst, sgst });
-        if (!res.ok) {
-          setError(res.error);
-          toast.error(res.error);
-          return;
-        }
-        toast.success(`${res.data.orderNumber} updated`, { description: "Cash vs Bank and the reports now use these amounts." });
-        router.push(`/orders/${initial.orderId}`);
-        return;
+      try {
+        await send();
+      } catch {
+        // No answer from the server (internet dropped, app just updated): keep everything on screen.
+        setError(LOST_CONNECTION);
+        toast.error(LOST_CONNECTION);
       }
-      const payload = { items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: showCost ? l.unitCost : "" })),
-        notes,
-        cgst: showCost ? cgst : "",
-        sgst: showCost ? sgst : "",
-        paymentMethod: method,
-      };
-      const res = initial ? await updateOrderAction(initial.orderId, payload) : await createOrderAction(payload);
+    });
+  };
+
+  const send = async () => {
+    if (costsOnly && initial) {
+      const res = await updateOrderCostsAction(initial.orderId, { items: lines.map((l) => ({ itemId: l.itemId!, unitCost: l.unitCost })), notes, cgst, sgst });
       if (!res.ok) {
         setError(res.error);
         toast.error(res.error);
         return;
       }
-      toast.success(initial ? `${res.data.orderNumber} updated` : `${res.data.orderNumber} placed`, {
-        description: `${paidOnOrder ? `Paid by ${PAYMENT_LABEL[method]}. ` : ""}Click Received on the Orders page when the products arrive.`,
-      });
-      router.push("/orders");
+      toast.success(`${res.data.orderNumber} updated`, { description: "Cash vs Bank and the reports now use these amounts." });
+      router.push(`/orders/${initial.orderId}`);
+      return;
+    }
+    const payload = { items: lines.map((l) => ({ productId: l.productId, quantity: l.quantity, unitCost: showCost ? l.unitCost : "" })),
+      notes,
+      cgst: showCost ? cgst : "",
+      sgst: showCost ? sgst : "",
+      paymentMethod: method,
+      ...(initial ? {} : { requestKey }),
+    };
+    const res = initial ? await updateOrderAction(initial.orderId, payload) : await createOrderAction(payload);
+    if (!res.ok) {
+      setError(res.error);
+      toast.error(res.error);
+      return;
+    }
+    toast.success(initial ? `${res.data.orderNumber} updated` : `${res.data.orderNumber} placed`, {
+      description: `${paidOnOrder ? `Paid by ${PAYMENT_LABEL[method]}. ` : ""}Click Received on the Orders page when the products arrive.`,
     });
+    if (!initial) writeDraft(null);
+    router.push("/orders");
   };
 
   return (

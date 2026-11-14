@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import type { OrderStatus, PaymentMethod, Role } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import type { SessionUser } from "@/lib/auth/session";
@@ -58,6 +58,12 @@ export type OrderDTO = {
   paymentMethod: PaymentMethod | null;
   /** Owner-only: items plus GST; null for managers or when nothing has a cost. */
   totalCost: string | null;
+  /**
+   * Owner-only: on a paid order, what comes back for the units that never arrived (their cost plus
+   * their share of the GST). On an active order it is what closing would give back; on a closed
+   * one it went back to the account it was paid from on the day it was closed. Null when nothing.
+   */
+  refund: string | null;
   /** Lines that can still be booked in (pending and product still exists). */
   receivableLines: number;
 };
@@ -123,12 +129,40 @@ function toOrderDTO(o: OrderRow): OrderDTO {
     paidAt: o.paidAt ? o.paidAt.toISOString() : null,
     paymentMethod: o.paymentMethod,
     totalCost: hasCost ? fromPaise(cost) : null,
+    refund: o.paidAt && o.paymentMethod && o.status !== "RECEIVED" ? nullIfZero(refundPaise(o)) : null,
     receivableLines,
   };
 }
 
 export function orderGstPaise(o: { cgst: { toString(): string } | null; sgst: { toString(): string } | null }) {
   return toPaise(o.cgst?.toString() ?? "0") + toPaise(o.sgst?.toString() ?? "0");
+}
+
+const nullIfZero = (paise: number) => (paise > 0 ? fromPaise(paise) : null);
+
+type RefundSource = {
+  cgst: { toString(): string } | null;
+  sgst: { toString(): string } | null;
+  gstPaidAt: Date | null;
+  items: { quantityOrdered: number; quantityReceived: number; unitCost: { toString(): string } | null }[];
+};
+
+/**
+ * Money a paid order gets back for the units that never came: their cost, plus the same
+ * share of the GST that was paid with the order. Lines without a cost give nothing back.
+ */
+export function refundPaise(o: RefundSource): number {
+  let ordered = 0;
+  let missing = 0;
+  for (const i of o.items) {
+    if (!i.unitCost) continue;
+    const unit = toPaise(i.unitCost.toString());
+    ordered += unit * i.quantityOrdered;
+    missing += unit * Math.max(0, i.quantityOrdered - i.quantityReceived);
+  }
+  if (missing === 0) return 0;
+  const gst = o.gstPaidAt ? orderGstPaise(o) : 0;
+  return missing + Math.round((gst * missing) / ordered);
 }
 
 /** On a prepaid order the GST is paid with the order; no GST, nothing paid. */
@@ -139,7 +173,7 @@ function gstPaid(gst: Parameters<typeof orderGstPaise>[0], paidAt: Date, method:
 /** Costs are owner-only, same rule as productForViewer. */
 export function orderForViewer<T extends OrderDTO>(dto: T, role: Role): T {
   if (role === "OWNER") return dto;
-  return { ...dto, totalCost: null, cgst: null, sgst: null, items: dto.items.map((i) => ({ ...i, unitCost: null })) };
+  return { ...dto, totalCost: null, refund: null, cgst: null, sgst: null, items: dto.items.map((i) => ({ ...i, unitCost: null })) };
 }
 
 async function nextOrderNumber(tx: Prisma.TransactionClient) {
@@ -206,31 +240,50 @@ export async function createOrder(data: OrderCreateData, actor: SessionUser, now
   const isOwner = actor.role === "OWNER";
   const items = isOwner ? data.items : data.items.map((i) => ({ ...i, unitCost: null }));
   const gst = isOwner ? { cgst: data.cgst, sgst: data.sgst } : { cgst: null, sgst: null };
-  const orderId = await prisma.$transaction(async (tx) => {
-    const lines = await buildLines(tx, items);
-    const order = await tx.purchaseOrder.create({
-      data: {
-        orderNumber: await nextOrderNumber(tx),
-        notes: data.notes,
-        ...gst,
-        ...gstPaid(gst, now, data.paymentMethod),
-        paidAt: now,
-        paymentMethod: data.paymentMethod,
-        createdById: actor.id,
-        items: { createMany: { data: lines } },
-      },
-    });
-    const units = lines.reduce((n, l) => n + l.quantityOrdered, 0);
-    await recordAudit(tx, {
-      action: "ORDER_CREATED",
-      entityType: "PurchaseOrder",
-      entityId: order.id,
-      summary: `Placed ${order.orderNumber}: ${lines.length} product${lines.length === 1 ? "" : "s"}, ${units} unit${units === 1 ? "" : "s"}, paid by ${data.paymentMethod}`,
-      actorId: actor.id,
-    });
-    return order.id;
-  });
+  const requestKey = data.requestKey ?? null;
+  // Pressed again after a lost connection: the first try may already have placed it.
+  const placedBefore = async () =>
+    requestKey ? (await prisma.purchaseOrder.findUnique({ where: { requestKey }, select: { id: true } }))?.id : undefined;
+  const existing = await placedBefore();
+  if (existing) return (await getOrder(existing))!;
+  let orderId: string;
+  try {
+    orderId = await placeOrder();
+  } catch (err) {
+    // Both tries arrived at the same moment: the other one placed it.
+    const raced = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" ? await placedBefore() : undefined;
+    if (!raced) throw err;
+    orderId = raced;
+  }
   return (await getOrder(orderId))!;
+
+  function placeOrder() {
+    return prisma.$transaction(async (tx) => {
+      const lines = await buildLines(tx, items);
+      const order = await tx.purchaseOrder.create({
+        data: {
+          requestKey,
+          orderNumber: await nextOrderNumber(tx),
+          notes: data.notes,
+          ...gst,
+          ...gstPaid(gst, now, data.paymentMethod),
+          paidAt: now,
+          paymentMethod: data.paymentMethod,
+          createdById: actor.id,
+          items: { createMany: { data: lines } },
+        },
+      });
+      const units = lines.reduce((n, l) => n + l.quantityOrdered, 0);
+      await recordAudit(tx, {
+        action: "ORDER_CREATED",
+        entityType: "PurchaseOrder",
+        entityId: order.id,
+        summary: `Placed ${order.orderNumber}: ${lines.length} product${lines.length === 1 ? "" : "s"}, ${units} unit${units === 1 ? "" : "s"}, paid by ${data.paymentMethod}`,
+        actorId: actor.id,
+      });
+      return order.id;
+    });
+  }
 }
 
 /** Owner only. Replaces the lines and notes while nothing has been received yet. */
@@ -442,21 +495,28 @@ export async function receiveOrder(input: OrderReceiveData, actor: SessionUser):
 
 /* ---------- Close ---------- */
 
-/** Owner only. Stops waiting for whatever is still pending. Stock is not touched. */
+/**
+ * Owner only. Stops waiting for whatever is still pending. Stock is not touched. On an order
+ * paid when placed, the money for what never came goes back to the account it was paid from
+ * (see listOrderRefunds); nothing is stored for it, it follows from the closed order.
+ */
 export async function closeOrder(input: { orderId: string; reason: string }, actor: SessionUser): Promise<OrderDetailDTO> {
   requireOwner(actor, "close orders");
   await prisma.$transaction(async (tx) => {
     const order = await lockOrder(tx, input.orderId);
     if (order.status !== "ACTIVE") throw new AppError(`${order.orderNumber} is not active.`, "CONFLICT");
-    await tx.purchaseOrder.update({
+    const closed = await tx.purchaseOrder.update({
       where: { id: order.id },
       data: { status: "CLOSED", closedById: actor.id, closedAt: new Date(), closeReason: input.reason },
+      select: { paidAt: true, paymentMethod: true, cgst: true, sgst: true, gstPaidAt: true, items: { select: { quantityOrdered: true, quantityReceived: true, unitCost: true } } },
     });
+    const refund = closed.paidAt && closed.paymentMethod ? refundPaise(closed) : 0;
     await recordAudit(tx, {
       action: "ORDER_CLOSED",
       entityType: "PurchaseOrder",
       entityId: order.id,
-      summary: `Closed ${order.orderNumber}: ${input.reason}`,
+      summary: `Closed ${order.orderNumber}: ${input.reason}${refund > 0 ? ` (${fromPaise(refund)} back to ${closed.paymentMethod})` : ""}`,
+      metadata: refund > 0 ? { refund: fromPaise(refund), paymentMethod: closed.paymentMethod } : undefined,
       actorId: actor.id,
     });
   });
@@ -557,6 +617,35 @@ export async function listPrepaidOrders(paidAt: Prisma.DateTimeNullableFilter<"P
   });
 }
 
+export type OrderRefund = { id: string; orderNumber: string; closedAt: Date; paymentMethod: PaymentMethod; units: number; paise: number };
+
+/** Paid orders closed in the window with units that never came: the money back for them, on the day of closing. */
+export async function listOrderRefunds(closedAt: Prisma.DateTimeNullableFilter<"PurchaseOrder">): Promise<OrderRefund[]> {
+  const rows = await prisma.purchaseOrder.findMany({
+    where: { status: "CLOSED", closedAt, paidAt: { not: null }, paymentMethod: { not: null } },
+    select: {
+      id: true,
+      orderNumber: true,
+      closedAt: true,
+      paymentMethod: true,
+      cgst: true,
+      sgst: true,
+      gstPaidAt: true,
+      items: { select: { quantityOrdered: true, quantityReceived: true, unitCost: true } },
+    },
+  });
+  return rows
+    .map((o) => ({
+      id: o.id,
+      orderNumber: o.orderNumber,
+      closedAt: o.closedAt!,
+      paymentMethod: o.paymentMethod!,
+      units: o.items.reduce((n, i) => n + Math.max(0, i.quantityOrdered - i.quantityReceived), 0),
+      paise: refundPaise(o),
+    }))
+    .filter((r) => r.paise > 0);
+}
+
 /* ---------- Purchase report ---------- */
 
 export type PurchaseReportOrder = { orderId: string; orderNumber: string; paidOn: string; units: number; amount: string };
@@ -576,7 +665,7 @@ export type PurchaseReport = {
  * it was received.
  */
 export async function getPurchaseReport(range: { from: Date; to: Date }): Promise<PurchaseReport> {
-  const [rows, gstOrders, prepaid] = await Promise.all([
+  const [rows, gstOrders, prepaid, refunds] = await Promise.all([
     prisma.stockMovement.findMany({
       where: { type: "STOCK_IN", purchaseOrder: { paidAt: null }, createdAt: { gte: range.from, lte: range.to } },
       select: { quantityChange: true, unitCost: true, createdAt: true, purchaseOrder: { select: { id: true, orderNumber: true } } },
@@ -586,6 +675,7 @@ export async function getPurchaseReport(range: { from: Date; to: Date }): Promis
       select: { id: true, orderNumber: true, cgst: true, sgst: true, gstPaidAt: true },
     }),
     listPrepaidOrders({ gte: range.from, lte: range.to }),
+    listOrderRefunds({ gte: range.from, lte: range.to }),
   ]);
   const byOrder = new Map<string, { orderNumber: string; last: Date; units: number; paise: number }>();
   let total = 0;
@@ -615,6 +705,16 @@ export async function getPurchaseReport(range: { from: Date; to: Date }): Promis
     const cur = byOrder.get(o.id) ?? { orderNumber: o.orderNumber, last: o.gstPaidAt!, units: 0, paise: 0 };
     cur.paise += paise;
     byOrder.set(o.id, cur);
+  }
+  // Money back for what never came lowers the spending on the day the order was closed.
+  for (const r of refunds) {
+    total -= r.paise;
+    units -= r.units;
+    const cur = byOrder.get(r.id) ?? { orderNumber: r.orderNumber, last: r.closedAt, units: 0, paise: 0 };
+    cur.units -= r.units;
+    cur.paise -= r.paise;
+    if (r.closedAt > cur.last) cur.last = r.closedAt;
+    byOrder.set(r.id, cur);
   }
   const orders = [...byOrder.entries()]
     .map(([orderId, o]) => ({ orderId, orderNumber: o.orderNumber, paidOn: o.last.toISOString(), units: o.units, amount: fromPaise(o.paise) }))

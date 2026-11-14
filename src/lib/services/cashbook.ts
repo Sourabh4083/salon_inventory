@@ -6,7 +6,7 @@ import { getOwnerNames, getSettings } from "@/lib/services/settings";
 import { fromPaise, toPaise } from "@/lib/money";
 import { formatMoney } from "@/lib/format";
 import { endOfDay, startOfDay, toDateParam } from "@/lib/dates";
-import { listPrepaidOrders, orderGstPaise } from "@/lib/services/orders";
+import { listOrderRefunds, listPrepaidOrders, orderGstPaise } from "@/lib/services/orders";
 import type { SessionUser } from "@/lib/auth/session";
 import type { BalancesData, CashDepositData, OwnerWithdrawalData } from "@/lib/validation/schemas";
 
@@ -78,7 +78,7 @@ function toMovement(l: Lines): AccountMovement {
 }
 
 async function movement(w: Window): Promise<MoneyMovement> {
-  const [received, expenses, salary, advances, stock, deposits, gst, taken, prepaid] = await Promise.all([
+  const [received, expenses, salary, advances, stock, deposits, gst, taken, prepaid, refunds] = await Promise.all([
     prisma.billPayment.groupBy({ by: ["method"], where: { paidAt: dated(w), ...recorded(w), bill: { status: "COMPLETED" } }, _sum: { amount: true } }),
     prisma.expense.groupBy({ by: ["paymentMethod"], where: { spentOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
     // The amount is what was handed over, after advances and cuts, so advances are not counted twice.
@@ -89,6 +89,7 @@ async function movement(w: Window): Promise<MoneyMovement> {
     prisma.purchaseOrder.findMany({ where: gstWhere(w), select: { cgst: true, sgst: true, gstPaymentMethod: true } }),
     prisma.ownerWithdrawal.groupBy({ by: ["paymentMethod"], where: { takenOn: dated(w), ...recorded(w) }, _sum: { amount: true } }),
     listPrepaidOrders(paidWhere(w)),
+    listOrderRefunds(paidWhere(w)),
   ]);
   const by: Record<Account, Lines> = { cash: noLines(), bank: noLines() };
   const paise = (v: { toString(): string } | null) => toPaise(v?.toString() ?? "0");
@@ -99,6 +100,8 @@ async function movement(w: Window): Promise<MoneyMovement> {
   for (const r of stock) by[accountOf(r.paymentMethod!)].stock += paise(r.unitCost) * r.quantityChange;
   for (const o of gst) by[accountOf(o.gstPaymentMethod!)].stock += orderGstPaise(o);
   for (const o of prepaid) by[accountOf(o.paymentMethod)].stock += o.paise;
+  // A closed paid order gives back what never came: the stock spending goes down by it.
+  for (const r of refunds) by[accountOf(r.paymentMethod)].stock -= r.paise;
   for (const r of taken) by[accountOf(r.paymentMethod)].taken += paise(r._sum.amount);
   by.cash.moved = -paise(deposits._sum.amount);
   by.bank.moved = paise(deposits._sum.amount);
@@ -220,7 +223,7 @@ export type MoneyEntry = {
 /** The passbook: every payment in or out in the period, newest first. */
 export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 200): Promise<{ items: MoneyEntry[]; more: boolean }> {
   const w: Window = range;
-  const [received, expenses, salary, advances, stock, deposits, gst, taken, prepaid] = await Promise.all([
+  const [received, expenses, salary, advances, stock, deposits, gst, taken, prepaid, refunds] = await Promise.all([
     prisma.billPayment.findMany({
       where: { paidAt: dated(w), bill: { status: "COMPLETED" } },
       orderBy: { paidAt: "desc" },
@@ -248,6 +251,7 @@ export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 
     prisma.purchaseOrder.findMany({ where: gstWhere(w), select: { id: true, orderNumber: true, cgst: true, sgst: true, gstPaidAt: true, gstPaymentMethod: true } }),
     prisma.ownerWithdrawal.findMany({ where: { takenOn: dated(w) }, orderBy: { takenOn: "desc" }, take: limit + 1, select: { id: true, ownerName: true, amount: true, paymentMethod: true, takenOn: true } }),
     listPrepaidOrders(paidWhere(w)),
+    listOrderRefunds(dated(w)),
   ]);
 
   type Row = Omit<MoneyEntry, "date" | "amount" | "account"> & { at: Date; paise: number; account?: Account };
@@ -280,6 +284,9 @@ export async function listMoneyEntries(range: { from: Date; to: Date }, limit = 
   for (const o of prepaid) if (o.paise > 0) addToDelivery(o, o.paymentMethod, o.paidAt, o.paise);
   for (const o of gst) addToDelivery(o, o.gstPaymentMethod!, o.gstPaidAt!, orderGstPaise(o));
   rows.push(...deliveries.values());
+  for (const r of refunds) {
+    rows.push({ key: `refund-${r.id}`, at: r.closedAt, label: `Money back · ${r.orderNumber} (not received)`, method: r.paymentMethod, paise: r.paise, href: `/orders/${r.id}` });
+  }
   // Like a real passbook: one line leaving the drawer, one arriving in the bank.
   for (const d of deposits) {
     const paise = toPaise(d.amount.toString());

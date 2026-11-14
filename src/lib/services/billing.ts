@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db";
-import type { Prisma } from "@/generated/prisma/client";
+import { Prisma } from "@/generated/prisma/client";
 import type { BillItemKind, BillStatus, PaymentMethod } from "@/generated/prisma/enums";
 import { AppError } from "@/lib/errors";
 import type { SessionUser } from "@/lib/auth/session";
@@ -184,130 +184,149 @@ export async function createBill(data: BillCreateData, actor: SessionUser): Prom
     if (item.kind === "PRODUCT") productQty.set(item.productId, (productQty.get(item.productId) ?? 0) + item.quantity);
   }
 
-  const billId = await prisma.$transaction(async (tx) => {
-    // Completing an open bill removes it in the same transaction, so it can't become two bills.
-    let openBillEmployeeIds: string[] = [];
-    if (data.openBillId) {
-      const open = await tx.openBill.findUnique({ where: { id: data.openBillId }, select: { employees: { select: { id: true } } } });
-      const { count } = await tx.openBill.deleteMany({ where: { id: data.openBillId } });
-      if (!open || !count) throw new AppError("This open bill was already completed or discarded.", "CONFLICT");
-      openBillEmployeeIds = open.employees.map((e) => e.id);
-    }
-    await assertBillingEmployees(tx, data.employeeIds, openBillEmployeeIds);
+  // Only a new bill carries a key; completing an open bill is already made once by removing the open bill.
+  const requestKey = data.openBillId ? null : (data.requestKey ?? null);
+  // Saved again after a lost connection: the first try may already have made it.
+  const madeBefore = async () => (requestKey ? (await prisma.bill.findUnique({ where: { requestKey }, select: { id: true } }))?.id : undefined);
+  const existing = await madeBefore();
+  if (existing) return (await getBill(existing))!;
 
-    const productIds = [...productQty.keys()].sort();
-    const products = new Map<string, Awaited<ReturnType<typeof lockProduct>>>();
-    for (const id of productIds) {
-      const locked = await lockProduct(tx, id);
-      if (locked.status !== "ACTIVE") throw new AppError(`"${locked.name}" is archived and cannot be sold.`);
-      const need = productQty.get(id)!;
-      if (locked.quantity < need) {
-        throw new AppError(
-          locked.quantity === 0
-            ? `"${locked.name}" is out of stock.`
-            : `Only ${locked.quantity} of "${locked.name}" available, but the bill needs ${need}.`,
-          "INSUFFICIENT_STOCK",
-        );
+  let billId: string;
+  try {
+    billId = await makeBill();
+  } catch (err) {
+    // Both tries arrived at the same moment: the other one made it.
+    const raced = err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002" ? await madeBefore() : undefined;
+    if (!raced) throw err;
+    billId = raced;
+  }
+  return (await getBill(billId))!;
+
+  function makeBill() {
+    return prisma.$transaction(async (tx) => {
+      // Completing an open bill removes it in the same transaction, so it can't become two bills.
+      let openBillEmployeeIds: string[] = [];
+      if (data.openBillId) {
+        const open = await tx.openBill.findUnique({ where: { id: data.openBillId }, select: { employees: { select: { id: true } } } });
+        const { count } = await tx.openBill.deleteMany({ where: { id: data.openBillId } });
+        if (!open || !count) throw new AppError("This open bill was already completed or discarded.", "CONFLICT");
+        openBillEmployeeIds = open.employees.map((e) => e.id);
       }
-      products.set(id, locked);
-    }
+      await assertBillingEmployees(tx, data.employeeIds, openBillEmployeeIds);
 
-    const serviceIds = data.items.flatMap((i) => (i.kind === "SERVICE" && i.serviceId ? [i.serviceId] : []));
-    const services = new Map<string, { id: string; name: string }>();
-    if (serviceIds.length) {
-      for (const s of await tx.service.findMany({ where: { id: { in: serviceIds } } })) services.set(s.id, s);
-    }
+      const productIds = [...productQty.keys()].sort();
+      const products = new Map<string, Awaited<ReturnType<typeof lockProduct>>>();
+      for (const id of productIds) {
+        const locked = await lockProduct(tx, id);
+        if (locked.status !== "ACTIVE") throw new AppError(`"${locked.name}" is archived and cannot be sold.`);
+        const need = productQty.get(id)!;
+        if (locked.quantity < need) {
+          throw new AppError(
+            locked.quantity === 0
+              ? `"${locked.name}" is out of stock.`
+              : `Only ${locked.quantity} of "${locked.name}" available, but the bill needs ${need}.`,
+            "INSUFFICIENT_STOCK",
+          );
+        }
+        products.set(id, locked);
+      }
 
-    let subtotal = 0;
-    const items: Prisma.BillItemCreateManyBillInput[] = data.items.map((item, index) => {
-      const unitPrice = toPaise(item.unitPrice);
-      const lineTotal = unitPrice * item.quantity;
-      subtotal += lineTotal;
-      if (item.kind === "PRODUCT") {
-        const p = products.get(item.productId)!;
+      const serviceIds = data.items.flatMap((i) => (i.kind === "SERVICE" && i.serviceId ? [i.serviceId] : []));
+      const services = new Map<string, { id: string; name: string }>();
+      if (serviceIds.length) {
+        for (const s of await tx.service.findMany({ where: { id: { in: serviceIds } } })) services.set(s.id, s);
+      }
+
+      let subtotal = 0;
+      const items: Prisma.BillItemCreateManyBillInput[] = data.items.map((item, index) => {
+        const unitPrice = toPaise(item.unitPrice);
+        const lineTotal = unitPrice * item.quantity;
+        subtotal += lineTotal;
+        if (item.kind === "PRODUCT") {
+          const p = products.get(item.productId)!;
+          return {
+            kind: "PRODUCT",
+            productId: p.id,
+            name: p.name,
+            quantity: item.quantity,
+            unitPrice: fromPaise(unitPrice),
+            unitCost: p.costPrice,
+            lineTotal: fromPaise(lineTotal),
+            sortOrder: index,
+          };
+        }
+        const s = item.serviceId ? services.get(item.serviceId) : undefined;
         return {
-          kind: "PRODUCT",
-          productId: p.id,
-          name: p.name,
+          kind: "SERVICE",
+          serviceId: s?.id ?? null,
+          name: item.name,
           quantity: item.quantity,
           unitPrice: fromPaise(unitPrice),
-          unitCost: p.costPrice,
+          unitCost: null,
           lineTotal: fromPaise(lineTotal),
           sortOrder: index,
         };
-      }
-      const s = item.serviceId ? services.get(item.serviceId) : undefined;
-      return {
-        kind: "SERVICE",
-        serviceId: s?.id ?? null,
-        name: item.name,
-        quantity: item.quantity,
-        unitPrice: fromPaise(unitPrice),
-        unitCost: null,
-        lineTotal: fromPaise(lineTotal),
-        sortOrder: index,
-      };
-    });
-
-    const discount = toPaise(data.discount);
-    if (discount < 0) throw new AppError("Discount cannot be negative.");
-    if (discount > subtotal) throw new AppError("Discount cannot be more than the bill subtotal.");
-    const total = subtotal - discount;
-    const parts = counterParts(data, total);
-    const paid = parts.reduce((n, p) => n + p.paise, 0);
-    const now = new Date();
-
-    const bill = await tx.bill.create({
-      data: {
-        billNumber: await nextBillNumber(tx),
-        customerName: data.customerName,
-        customerPhone: data.customerPhone,
-        customerPhoneKey: phoneKey(data.customerPhone),
-        subtotal: fromPaise(subtotal),
-        discount: fromPaise(discount),
-        total: fromPaise(total),
-        paymentMethod: parts.length === 1 ? parts[0].method : null,
-        balanceDue: fromPaise(total - paid),
-        notes: data.notes,
-        createdById: actor.id,
-        createdAt: now,
-        items: { createMany: { data: items } },
-        employees: { connect: data.employeeIds.map((id) => ({ id })) },
-        payments: { create: parts.map((p) => ({ amount: fromPaise(p.paise), method: p.method, paidAt: now, atBilling: true, createdById: actor.id })) },
-      },
-    });
-
-    // One SALE movement per product (combined quantity), linked to the bill.
-    for (const id of productIds) {
-      const p = products.get(id)!;
-      const qty = productQty.get(id)!;
-      await applyChange(tx, {
-        productId: id,
-        type: "SALE",
-        previousQuantity: p.quantity,
-        newQuantity: p.quantity - qty,
-        note: `Sold on ${bill.billNumber}`,
-        actorId: actor.id,
-        billId: bill.id,
       });
-    }
 
-    await closeEnquiryForBill(tx, bill, actor.id);
-    await updateServiceReminders(tx, bill, items, actor.id);
+      const discount = toPaise(data.discount);
+      if (discount < 0) throw new AppError("Discount cannot be negative.");
+      if (discount > subtotal) throw new AppError("Discount cannot be more than the bill subtotal.");
+      const total = subtotal - discount;
+      const parts = counterParts(data, total);
+      const paid = parts.reduce((n, p) => n + p.paise, 0);
+      const now = new Date();
 
-    await recordAudit(tx, {
-      action: "BILL_CREATED",
-      entityType: "Bill",
-      entityId: bill.id,
-      summary: `Created ${bill.billNumber} for ${fromPaise(total)} (${items.length} line${items.length === 1 ? "" : "s"}, ${
-        paid === total && parts.length ? partsLabel(parts) : `pay later, ${fromPaise(total - paid)} due`
-      })`,
-      actorId: actor.id,
+      const bill = await tx.bill.create({
+        data: {
+          requestKey,
+          billNumber: await nextBillNumber(tx),
+          customerName: data.customerName,
+          customerPhone: data.customerPhone,
+          customerPhoneKey: phoneKey(data.customerPhone),
+          subtotal: fromPaise(subtotal),
+          discount: fromPaise(discount),
+          total: fromPaise(total),
+          paymentMethod: parts.length === 1 ? parts[0].method : null,
+          balanceDue: fromPaise(total - paid),
+          notes: data.notes,
+          createdById: actor.id,
+          createdAt: now,
+          items: { createMany: { data: items } },
+          employees: { connect: data.employeeIds.map((id) => ({ id })) },
+          payments: { create: parts.map((p) => ({ amount: fromPaise(p.paise), method: p.method, paidAt: now, atBilling: true, createdById: actor.id })) },
+        },
+      });
+
+      // One SALE movement per product (combined quantity), linked to the bill.
+      for (const id of productIds) {
+        const p = products.get(id)!;
+        const qty = productQty.get(id)!;
+        await applyChange(tx, {
+          productId: id,
+          type: "SALE",
+          previousQuantity: p.quantity,
+          newQuantity: p.quantity - qty,
+          note: `Sold on ${bill.billNumber}`,
+          actorId: actor.id,
+          billId: bill.id,
+        });
+      }
+
+      await closeEnquiryForBill(tx, bill, actor.id);
+      await updateServiceReminders(tx, bill, items, actor.id);
+
+      await recordAudit(tx, {
+        action: "BILL_CREATED",
+        entityType: "Bill",
+        entityId: bill.id,
+        summary: `Created ${bill.billNumber} for ${fromPaise(total)} (${items.length} line${items.length === 1 ? "" : "s"}, ${
+          paid === total && parts.length ? partsLabel(parts) : `pay later, ${fromPaise(total - paid)} due`
+        })`,
+        actorId: actor.id,
+      });
+      return bill.id;
     });
-    return bill.id;
-  });
-
-  return (await getBill(billId))!;
+  }
 }
 
 /* ---------- Read ---------- */
