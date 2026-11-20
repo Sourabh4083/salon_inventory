@@ -44,9 +44,14 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
 - **Low Stock** and **Out of Stock** screens, driven by a shop-wide threshold with an optional per-product
   override.
 - **Barcode**: USB scanners (type and Enter), search by code, and phone-camera scanning at `/scan`.
-- **Purchase orders** (`ORD-000001`): add products to an order, mark lines received as deliveries arrive
-  (stock goes up on receipt), and the order stays active until everything is received or the owner
-  closes it.
+- **Categories** are managed by the owner in Settings. A category can be marked **Needs servicing**, which
+  starts servicing reminders on the Calls page when its products are sold.
+- **Purchase orders** (`ORD-000001`): add products to an order (new products can be created while
+  ordering), mark lines received as deliveries arrive (stock goes up on receipt), and the order stays
+  active until everything is received or the owner closes it. Each order has a payment method and can
+  record the CGST and SGST amounts from the supplier's bill. The money (including GST) leaves Cash or
+  Bank when the order is placed; closing an order refunds what never arrived. Orders placed before this rule have no
+  payment date and are paid on each delivery instead.
 - **Prices & Margins** (owner): cost, selling price, profit per unit, margin and stock value, with inline
   price editing.
 
@@ -56,28 +61,57 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
   and price per line, discount, and payment by Cash, UPI or Card. Completing a bill saves it as
   `BILL-000001` and reduces stock in the same transaction. Prices are copied onto the bill, so later
   catalogue changes never alter old bills.
-- **Open bills**: for a customer still in the shop, the manager picks the employee handling them, adds
-  products and services as they are used, and taps **Keep open**. Open bills show as cards on the Bills
-  page; the bill is completed when the customer pays. Stock changes only on completion.
+- **Split payment**: one bill can be paid by several methods (for example part Cash, part UPI). The
+  parts must add up to the amount paid.
+- **Handled by**: the employees who worked on the customer can be saved on the bill (several allowed).
+- **Open bills**: for a customer still in the shop, the manager picks one or more employees handling
+  them (shown as chips), adds products and services as they are used, and taps **Keep open**. Open bills
+  show as cards on the Bills page; the bill is completed when the customer pays, or discarded. Stock
+  changes only on completion.
 - **Pay later**: part or nothing paid at the counter, with the balance tracked on the bill and collected
   in one or more later payments. Customer name and phone are required.
-- **Bills list** with search, status and date filters, an "unpaid" view, and a printable receipt sized
-  for 80 mm thermal rolls or A4.
-- **Owner only**: edit a completed bill (stock, reports and profit follow), cancel a bill (stock is put
-  back), manage the services catalogue.
+- **Returning customers**: customers are remembered from past bills by the last 10 digits of their
+  phone number (there is no separate customer table). The bill screen suggests names and numbers as
+  you type, shows the customer's visit history, and notes when a customer came after a call from the
+  Calls page.
+- **Safe retry**: a new bill (and a new purchase order) is kept as a draft on the device and saved with
+  a one-time request key, so pressing Save again after a lost connection never creates it twice.
+- **Bills list** with search, status and date filters, an "unpaid" view, customer, handled-by and
+  billed-by columns, and a printable receipt sized for 80 mm thermal rolls or A4.
+- **WhatsApp**: a button opens WhatsApp (`wa.me`) with a message for the customer that includes a secret
+  bill link (`/b/<code>`). The link works for 10 days without a login and lets the customer view the bill
+  and download it as a PDF. The owner can turn a link off.
+- **Owner only**: edit a completed bill (stock, reports, profit and servicing reminders follow), cancel
+  a bill (stock is put back), remove a payment, manage the services catalogue.
 
 ### Shop operations
 
 - **Expenses**: day-to-day spending with amount, description and payment method.
-- **Calls**: new-customer leads (phone numbers from JustDial, WhatsApp or callers). Tap to dial, log the
-  result (Coming, Call back, No answer, Not interested) with a follow-up date. A lead closes
-  automatically as Visited when a bill is made for the same number.
+- **Calls**: new-customer leads (phone numbers from JustDial, WhatsApp or callers), pasted several at a
+  time; invalid numbers and numbers already in the list are flagged. Tap to dial or open WhatsApp, log
+  the result (Coming, Call back, No answer, Not interested) with a follow-up date and note. Numbers are
+  sorted into To call today, Coming, Call later and Closed. A lead closes automatically as Visited when a
+  bill is made for the same number.
+- **Wig servicing reminders**: selling a product from a Needs servicing category adds a card to Calls,
+  due 25 days later. A later bill from the same number (15 or more days on) counts as the servicing
+  visit and starts the next 25 days. Seven months after purchase the same card becomes a replacement
+  reminder. Editing or cancelling a bill updates its reminders.
 - **Employees**: staff records, masked Aadhaar number, document uploads (JPG, PNG, WebP or PDF up to
   4 MB, stored in PostgreSQL), monthly salary, salary payment log and cash advances.
-- **Attendance**: Present, Absent, Half day, Holiday and Leave per day, with a month summary and the pay
-  cut it produces.
-- **Sales Reports** (owner): sales, product and service income, gross profit, expenses, product
-  purchases, payments received, sales by day, top products and services.
+- **Attendance**: Present, Absent, Half day, Holiday and Leave per day, a Mark all present button, and a
+  month summary with the pay cut it produces.
+- **Sales Reports** (owner): pick Today, Yesterday, 7 days, 30 days, This month or custom dates. Four
+  clickable cards open their own view:
+  - **Sales**: products sold, services done, discounts, sales by day and money received.
+  - **Money spent**: stock bought, shop expenses and staff pay (a daily share of each salary).
+  - **Profit**: Sales − Money spent, with where the money went.
+  - **Cash vs Bank**: running balances from the opening amounts the owner counted, with every bill
+    payment, expense, order and salary taken from Cash or Bank by its payment method, and a passbook
+    of every entry.
+- **Cash moved to bank**: record a deposit; Cash goes down and Bank goes up by the same amount. It is not
+  spending, so profit does not change.
+- **Owner withdrawals**: money one of the partners takes from the shop, with totals per owner. It lowers
+  Cash or Bank but not profit. Owner names are set in Settings.
 - **Excel export** (owner): products, bills, sales report, expenses, salaries and stock activity.
 
 ### Platform
@@ -103,7 +137,8 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
 | Stock Activity (movement ledger) | ✓ | – |
 | Create bills, open bills, print receipts | ✓ | ✓ |
 | Record payments on pay-later bills | ✓ | ✓ |
-| Edit or cancel bills, manage services | ✓ | – |
+| Send a bill on WhatsApp | ✓ | ✓ |
+| Edit or cancel bills, remove payments, turn off a bill link, manage services | ✓ | – |
 | View purchase orders, mark deliveries received | ✓ | ✓ |
 | Place purchase orders, adding new products while ordering (no costs for the manager) | ✓ | ✓ |
 | Edit and close purchase orders, see order costs | ✓ | – |
@@ -115,8 +150,8 @@ ledger, money is handled in integer paise, and all permissions are enforced on t
 | Decide whether a leave is paid, see pay cut amounts | ✓ | – |
 | Employee names, designation, phone and joining date | ✓ | ✓ |
 | Salaries, personal details, documents, salary payments | ✓ | – |
-| Sales Reports, Excel export | ✓ | – |
-| Users, business settings, categories, audit log | ✓ | – |
+| Sales Reports, Cash vs Bank, cash deposits, owner withdrawals, Excel export | ✓ | – |
+| Users, business settings, categories, owner names, audit log | ✓ | – |
 
 The matrix lives in [`src/lib/permissions.ts`](src/lib/permissions.ts). It is enforced in every server
 action (`requirePermission`) and page (`requirePermissionPage`), in addition to the route proxy and the
@@ -179,6 +214,7 @@ src/
     login/                 Login page
     (app)/                 Authenticated area: dashboard, billing, inventory, orders, expenses,
                            calls, reports, pricing, employees, attendance, activity, users, settings, scan
+    b/[token]/             Public bill page and PDF behind the secret WhatsApp link
     actions/               Server Actions
     api/                   File routes: Excel export, employee documents
     globals.css            Design tokens for the day and night palettes, print styles
@@ -298,7 +334,8 @@ sequences (`product_number_seq`, `bill_number_seq`, `order_number_seq`) created 
 | Inventory | `Category`, `Product`, `StockMovement`, `PurchaseOrder`, `PurchaseOrderItem` |
 | Billing | `Service`, `Bill`, `BillItem`, `BillPayment`, `OpenBill` |
 | Staff | `Employee`, `EmployeeDocument`, `SalaryPayment`, `EmployeeAdvance`, `Attendance` |
-| Shop | `Expense`, `Enquiry`, `EnquiryCall` |
+| Shop | `Expense`, `Enquiry` (leads and servicing reminders), `EnquiryCall` |
+| Money | `CashDeposit`, `OwnerWithdrawal`; opening balances and owner names live on `BusinessSettings` |
 
 ## Business rules
 
@@ -330,6 +367,17 @@ dashboard counts.
   serialised with a row lock so the balance cannot drift.
 - Completing an open bill deletes the open bill in the same transaction as creating the bill, so one
   open bill can never produce two bills.
+- A split bill has several payments taken at the counter and no single payment method on the bill.
+- New bills and purchase orders carry a unique request key, so a retried save returns the first result
+  instead of making a duplicate.
+
+### Cash and bank
+
+- Profit is Sales − Money spent. Money spent is stock bought, shop expenses and staff pay.
+- The Cash and Bank balances start from the opening amounts set by the owner. Bill payments go to Cash
+  (Cash) or Bank (UPI, Card); expenses, orders, salaries, advances and owner withdrawals come out by
+  their payment method.
+- Moving cash to the bank and owner withdrawals change the balances but never profit.
 
 ### Attendance and pay cuts
 
@@ -352,15 +400,15 @@ read a column as the salon's wall clock with `"createdAt" AT TIME ZONE 'Asia/Kol
 
 ```bash
 npm run db:start      # the database must be running
-npm test              # 183 tests across 17 files
+npm test              # 21 test files
 
 npm run dev           # then, in another terminal, against a seeded database:
 npm run test:http     # redirects, forged cookies, owner-only routes
 ```
 
 The suite covers authentication, permissions, products, the stock ledger, concurrency, billing, bill
-edits, pay-later payments, open bills, purchase orders, employees, advances, expenses, enquiries and
-attendance.
+edits, pay-later payments, open bills, bill sharing, returning customers, purchase orders, employees,
+advances, expenses, enquiries, servicing reminders, attendance, profit, cash and bank, and timezones.
 
 Integration tests run against a real PostgreSQL database, migrate it automatically and **wipe every
 table in it**. They use `TEST_DATABASE_URL`, or `DATABASE_URL` with `_test` appended to the database
@@ -400,6 +448,8 @@ backups and test a restore.
   convenience, not a control.
 - All input is validated with Zod on the server.
 - Employee documents are stored in the database and served through an owner-only route.
+- The only pages open without a login are the shared bill page and its PDF (`/b/<code>`). The code is
+  random and secret, the link expires after 10 days, and the owner can turn it off at any time.
 - Important actions are written to the audit log, visible to the owner in Settings.
 
 To report a security issue, contact the repository owner privately instead of opening a public issue.
@@ -417,9 +467,8 @@ To report a security issue, contact the repository owner privately instead of op
 
 ## Roadmap
 
-Not in the current version: suppliers, GST invoices, returns and refunds, a customer list with visit
-history, appointments, multiple branches, per-employee sales, a configurable shop logo, and WhatsApp
-receipt sharing.
+Not in the current version: suppliers, GST invoices, returns and refunds, a separate customer list
+page, appointments, multiple branches, per-employee sales reports, a configurable shop logo, and SMS.
 
 ## License
 
