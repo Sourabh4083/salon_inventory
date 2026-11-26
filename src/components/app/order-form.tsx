@@ -303,18 +303,36 @@ export function OrderForm({
         </Field>
       </section>
 
-      <div className="flex flex-col-reverse gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground">
-          {lines.length} {lines.length === 1 ? "product" : "products"} · {totals.units} {totals.units === 1 ? "unit" : "units"}
-          {showCost && totals.cost > 0 ?` · about ${formatMoney(fromPaise(totals.cost), currencySymbol)}` : ""}
-        </p>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-          <Button size="lg" className="h-12 text-base" onClick={submit} disabled={pending || lines.length === 0}>
-            {pending ? <LoaderCircle className="animate-spin" /> : <Truck />}
-            {initial ? "Save changes" : "Place order"}
-          </Button>
-        </div>
+      <div className="flex flex-col gap-4 border-4 rounded-2xl p-4 shadow-xs sm:p-5">
+        {showCost ? (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-3 text-base">
+              <span className="text-muted-foreground">Products cost</span>
+              <span className="tabular-nums">{formatMoney(fromPaise(totals.cost - toPaise(cgst) - toPaise(sgst)), currencySymbol)}</span>
+            </div>
+            {toPaise(cgst) > 0 ? (
+              <div className="flex items-center justify-between gap-3 text-base">
+                <span className="text-muted-foreground">CGST</span>
+                <span className="tabular-nums">{formatMoney(fromPaise(toPaise(cgst)), currencySymbol)}</span>
+              </div>
+            ) : null}
+            {toPaise(sgst) > 0 ? (
+              <div className="flex items-center justify-between gap-3 text-base">
+                <span className="text-muted-foreground">SGST</span>
+                <span className="tabular-nums">{formatMoney(fromPaise(toPaise(sgst)), currencySymbol)}</span>
+              </div>
+            ) : null}
+            <div className="flex items-center justify-between gap-3 border-t pt-2">
+              <span className="text-lg font-semibold">Total to pay</span>
+              <span className="text-2xl font-bold tabular-nums">{formatMoney(fromPaise(totals.cost), currencySymbol)}</span>
+            </div>
+          </div>
+        ) : null}
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+        <Button size="lg" className="h-12 w-full text-base" onClick={submit} disabled={pending || lines.length === 0}>
+          {pending ? <LoaderCircle className="animate-spin" /> : <Truck />}
+          {initial ? "Save changes" : "Place order"}
+        </Button>
       </div>
 
       <ProductPickerDialog
